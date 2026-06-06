@@ -299,7 +299,8 @@ def composite(
     head_font = _font(head_font_size, bold=True)
     sub_font_size = max(20, H // 34)
     sub_font = _font(sub_font_size, bold=False)
-    cta_font_size = max(44, H // 16)  # 2× previous
+    # CTA proportions: ~60% of headline size; vertical padding ≈ 0.4× text height.
+    cta_font_size = max(28, H // 22)
     cta_font = _font(cta_font_size, bold=True)
 
     # Wrap copy
@@ -321,17 +322,18 @@ def composite(
     # CTA sizing (clip width to canvas)
     cta_text = (cta or "").strip()
     cta_h = 0
-    cta_px = pad // 2
-    cta_py = max(10, cta_font_size // 2)
+    # Tighter, more proportional padding — these were over-padded before.
+    cta_py = max(8, int(cta_font_size * 0.42))   # vertical padding inside pill
+    cta_px = max(16, int(cta_font_size * 0.9))    # horizontal padding inside pill
     if cta_text and cfg.get("cta_style") != "none":
         max_cta_text_w = max_text_w - 2 * cta_px
         cta_wrapped = _wrap(cta_text, cta_font, max_cta_text_w, odraw)
         cta_text = cta_wrapped[0] if cta_wrapped else cta_text[:30]
-        ctw_box = odraw.textbbox((0, 0), cta_text, font=cta_font)
-        cta_text_w = ctw_box[2] - ctw_box[0]
-        cta_text_h = ctw_box[3] - ctw_box[1]
-        cta_h = cta_text_h + 2 * cta_py
-    text_to_cta_gap = 22 if cta_h else 0
+        # Use ascent+descent for visual height (not bbox top which can include leading)
+        ascent, descent = cta_font.getmetrics()
+        cta_visual_h = ascent + descent
+        cta_h = cta_visual_h + 2 * cta_py
+    text_to_cta_gap = max(18, cta_font_size // 2)
 
     # Compute required band height & re-position the band
     content_pad = max(20, pad // 2)
@@ -384,41 +386,65 @@ def composite(
             y += sub_line_h
         y -= 2
 
-    # CTA — pill grows DOWN from y so it never overlaps the subtitle above
+    # CTA — pill grows DOWN from y. Text is properly centred using font metrics.
     if cta_h:
         y += text_to_cta_gap
-        ctw_box = odraw.textbbox((0, 0), cta_text, font=cta_font)
-        ctw = ctw_box[2] - ctw_box[0]
-        cth = ctw_box[3] - ctw_box[1]
-        # Pill top at y; text vertically centred inside the pill
+        # Use bbox for actual width; use ascent/descent for true vertical height.
+        bbox = odraw.textbbox((0, 0), cta_text, font=cta_font)
+        ctw = bbox[2] - bbox[0]  # rendered text width
+        ascent, descent = cta_font.getmetrics()
+
         pill_y0 = y
-        pill_y1 = y + cth + 2 * cta_py
-        cy0 = pill_y0 + cta_py  # text top inside pill
-        cx0 = text_x
-        pill_x0 = cx0 - cta_px
-        pill_x1 = min(cx0 + ctw + cta_px, bx1 - pad)
+        pill_y1 = y + ascent + descent + 2 * cta_py
+        pill_h = pill_y1 - pill_y0
+
+        # Width: text width + 2× padding. Anchored to text_x (left of headline).
+        pill_x0 = text_x
+        pill_x1 = min(text_x + ctw + 2 * cta_px, bx1 - pad)
+
+        # Text inside the pill, vertically centred using font metrics.
+        # draw.text positions the glyph cell top — bbox[1] tells us the top offset from origin.
+        text_y = pill_y0 + (pill_h - ascent - descent) // 2 - bbox[1]
+        # Horizontally centred inside the pill.
+        text_x_in_pill = pill_x0 + (pill_x1 - pill_x0 - ctw) // 2 - bbox[0]
+
+        radius = pill_h // 2  # full pill curvature
+
+        text_fill = "white"
+        # Auto-flip CTA text colour if brand colour is too light to read white on.
+        if _contrast_ratio(brand_rgb, (255, 255, 255)) < 3.0:
+            text_fill = "#111111"
 
         if cfg["cta_style"] == "pill":
+            # Subtle drop shadow (smaller offset, less opaque than before).
             shadow_layer = Image.new("RGBA", size, (0, 0, 0, 0))
             sdraw = ImageDraw.Draw(shadow_layer)
             sdraw.rounded_rectangle(
-                [pill_x0 + 3, pill_y0 + 4, pill_x1 + 3, pill_y1 + 4],
-                radius=(pill_y1 - pill_y0) // 2, fill=(0, 0, 0, 120),
+                [pill_x0 + 2, pill_y0 + 3, pill_x1 + 2, pill_y1 + 3],
+                radius=radius, fill=(0, 0, 0, 70),
             )
-            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(4))
+            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(3))
             overlay = Image.alpha_composite(overlay, shadow_layer)
             odraw = ImageDraw.Draw(overlay)
             odraw.rounded_rectangle(
                 [pill_x0, pill_y0, pill_x1, pill_y1],
-                radius=(pill_y1 - pill_y0) // 2, fill=brand_rgb + (255,),
+                radius=radius, fill=brand_rgb + (255,),
             )
-            odraw.text((cx0, cy0), cta_text, fill="white", font=cta_font)
+            odraw.text((text_x_in_pill, text_y), cta_text, fill=text_fill, font=cta_font)
         elif cfg["cta_style"] == "square":
-            odraw.rectangle([pill_x0, pill_y0, pill_x1, pill_y1], fill=brand_rgb + (255,))
-            odraw.text((cx0, cy0), cta_text, fill="white", font=cta_font)
+            odraw.rounded_rectangle(
+                [pill_x0, pill_y0, pill_x1, pill_y1],
+                radius=8, fill=brand_rgb + (255,),
+            )
+            odraw.text((text_x_in_pill, text_y), cta_text, fill=text_fill, font=cta_font)
         elif cfg["cta_style"] == "underline":
-            _draw_text_with_shadow(odraw, (cx0, cy0), cta_text, cta_font, fill=text_hex, shadow=shadow)
-            odraw.line([cx0, cy0 + cth + 6, cx0 + ctw, cy0 + cth + 6], fill=brand_hex, width=4)
+            # No pill — text only, brand-coloured, with underline beneath.
+            _draw_text_with_shadow(
+                odraw, (text_x, text_y), cta_text, cta_font,
+                fill=text_hex, shadow=shadow,
+            )
+            underline_y = text_y + ascent + 4
+            odraw.line([text_x, underline_y, text_x + ctw, underline_y], fill=brand_hex, width=3)
 
     # Merge band overlay onto canvas
     canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay)
