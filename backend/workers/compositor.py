@@ -312,13 +312,13 @@ def composite(
     # ---- 3. Headline + subtitle + CTA — content-driven layout ----
     max_text_w = W - 2 * pad
 
-    # Fonts
-    head_font_size = max(36, H // 18)
+    # Fixed pixel sizes so text reads identically across channels (Meta 1080² vs WhatsApp 1200×628).
+    # Padding still scales with canvas dimension so composition still feels balanced.
+    head_font_size = 62
     head_font = _font(head_font_size, bold=True)
-    sub_font_size = max(20, H // 34)
+    sub_font_size = 30
     sub_font = _font(sub_font_size, bold=False)
-    # CTA proportions: ~60% of headline size; vertical padding ≈ 0.4× text height.
-    cta_font_size = max(28, H // 22)
+    cta_font_size = 46
     cta_font = _font(cta_font_size, bold=True)
 
     # Wrap copy
