@@ -389,23 +389,23 @@ def composite(
     # CTA — pill grows DOWN from y. Text is properly centred using font metrics.
     if cta_h:
         y += text_to_cta_gap
-        # Use bbox for actual width; use ascent/descent for true vertical height.
         bbox = odraw.textbbox((0, 0), cta_text, font=cta_font)
-        ctw = bbox[2] - bbox[0]  # rendered text width
+        ctw = bbox[2] - bbox[0]            # visible glyph width
         ascent, descent = cta_font.getmetrics()
 
         pill_y0 = y
         pill_y1 = y + ascent + descent + 2 * cta_py
         pill_h = pill_y1 - pill_y0
 
-        # Width: text width + 2× padding. Anchored to text_x (left of headline).
         pill_x0 = text_x
         pill_x1 = min(text_x + ctw + 2 * cta_px, bx1 - pad)
 
-        # Text inside the pill, vertically centred using font metrics.
-        # draw.text positions the glyph cell top — bbox[1] tells us the top offset from origin.
-        text_y = pill_y0 + (pill_h - ascent - descent) // 2 - bbox[1]
-        # Horizontally centred inside the pill.
+        # Vertically centre the VISIBLE glyph (not the font cell) in the pill.
+        # Pillow's draw.text positions by top-left of the glyph cell; bbox[1] is the
+        # ascender offset to the visible top, bbox[3] is the descender extent.
+        # We want: text_y + (bbox[1] + bbox[3]) / 2  ==  pill_center
+        text_y = pill_y0 + (pill_h - bbox[1] - bbox[3]) // 2
+        # Horizontally centre using actual glyph bbox.
         text_x_in_pill = pill_x0 + (pill_x1 - pill_x0 - ctw) // 2 - bbox[0]
 
         radius = pill_h // 2  # full pill curvature
