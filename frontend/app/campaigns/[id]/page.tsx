@@ -16,7 +16,16 @@ export default function CampaignDetail() {
   const { data: creatives } = useQuery({
     queryKey: ["creatives", id],
     queryFn: () => apiFetch<Creative[]>(`/creatives?campaign_id=${id}`),
-    refetchInterval: 4000,
+    refetchInterval: (query) => {
+      // Stop polling once every creative has rendered + been judged.
+      const list = (query.state.data as Creative[] | undefined) ?? [];
+      if (list.length === 0) return 8000; // waiting for first row
+      const stillWorking = list.some(
+        (c) => c.governance_status === "pending" || !c.image_url
+      );
+      return stillWorking ? 8000 : false; // false = stop polling
+    },
+    refetchIntervalInBackground: false, // pause when tab is hidden
   });
 
   return (

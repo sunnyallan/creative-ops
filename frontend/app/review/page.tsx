@@ -25,7 +25,15 @@ export default function ReviewPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["creatives", "pending_review"],
     queryFn: () => apiFetch<Creative[]>("/creatives?status=pending_review"),
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      // Poll while there's anything still being processed; slow down when the queue is settled.
+      const list = (query.state.data as Creative[] | undefined) ?? [];
+      const stillWorking = list.some(
+        (c) => c.governance_status === "pending" || !c.image_url
+      );
+      return stillWorking ? 8000 : 30000; // 8s when active, 30s when idle
+    },
+    refetchIntervalInBackground: false,
   });
 
   const [rejecting, setRejecting] = useState<Creative | null>(null);
