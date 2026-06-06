@@ -7,6 +7,7 @@ type Cfg = {
   title_bar: "auto" | "solid_dark" | "solid_brand" | "gradient" | "none";
   title_position: "top" | "center" | "bottom";
   cta_style: "pill" | "underline" | "square" | "none";
+  cta_colour?: string | null;
 };
 
 const LOGO = ["top_left", "top_right", "bottom_left", "bottom_right", "center", "none"] as const;
@@ -50,6 +51,24 @@ export default function TemplateSettings() {
           onChange={(v) => setCfg({ ...cfg, title_position: v as Cfg["title_position"] })} />
         <Field label="CTA style" value={cfg.cta_style} options={CTA}
           onChange={(v) => setCfg({ ...cfg, cta_style: v as Cfg["cta_style"] })} />
+
+        <div>
+          <div className="text-sm font-medium">CTA button colour</div>
+          <div className="mt-1 flex items-center gap-2">
+            <input type="color"
+              value={cfg.cta_colour || "#111111"}
+              onChange={(e) => setCfg({ ...cfg, cta_colour: e.target.value })}
+              className="h-9 w-12 rounded border" />
+            <input type="text"
+              value={cfg.cta_colour || ""}
+              onChange={(e) => setCfg({ ...cfg, cta_colour: e.target.value || null })}
+              placeholder="#111111 (leave blank to use brand primary)"
+              className="rounded-md border px-2 py-1.5 text-sm w-72" />
+            <button type="button"
+              onClick={() => setCfg({ ...cfg, cta_colour: null })}
+              className="text-xs text-blue-600">use brand primary</button>
+          </div>
+        </div>
       </div>
 
       <button onClick={save} className="mt-6 rounded-md bg-neutral-900 px-4 py-2 text-white">Save template</button>

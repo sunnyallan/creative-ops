@@ -18,6 +18,7 @@ class TemplateConfig(BaseModel):
     title_bar: str = Field("auto")
     title_position: str = Field("bottom")
     cta_style: str = Field("pill")
+    cta_colour: str | None = Field(None)  # hex; if None, falls back to brand primary
 
 
 @router.get("", response_model=TemplateConfig)

@@ -23,9 +23,9 @@ export default function NewCampaign() {
   const [personas, setPersonas] = useState<string[]>([]);
   const [allPersonas, setAllPersonas] = useState<BrandKit["persona_definitions"]>([]);
 
-  const [headlineMax, setHeadlineMax] = useState(60);
-  const [bodyMax, setBodyMax] = useState(120);
-  const [ctaMax, setCtaMax] = useState(25);
+  const [headlineMax, setHeadlineMax] = useState(30);
+  const [bodyMax, setBodyMax] = useState(50);
+  const [ctaMax, setCtaMax] = useState(15);
 
   const [partnerOn, setPartnerOn] = useState(false);
   const [savedPartners, setSavedPartners] = useState<SavedPartner[]>([]);

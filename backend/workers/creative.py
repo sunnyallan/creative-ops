@@ -65,7 +65,7 @@ def _load_brand_kit(tenant_id: UUID) -> dict[str, Any]:
 
 def _gen_copy(brand_kit: dict[str, Any], brief: dict[str, Any], tenant_id: str, campaign_id: str,
               constraints: dict[str, int] | None = None) -> dict[str, str]:
-    c = constraints or {"headline_max_chars": 60, "body_max_chars": 120, "cta_max_chars": 25}
+    c = constraints or {"headline_max_chars": 30, "body_max_chars": 50, "cta_max_chars": 15}
     prompt = (
         _brand_prefix(brand_kit)
         + "TASK: Write ad copy for the brief. Return JSON: "
@@ -95,8 +95,8 @@ def _gen_placeholder_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> 
     import random
     from PIL import Image, ImageDraw, ImageFont
 
-    colours = brand_kit.get("colours") or ["#1a73e8", "#f4b400"]
-    primary = colours[0] if colours[0].startswith("#") else "#1a73e8"
+    colours = brand_kit.get("colours") or ["#111111", "#f4b400"]
+    primary = colours[0] if colours[0].startswith("#") else "#111111"
     accent = colours[1] if len(colours) > 1 and colours[1].startswith("#") else "#f4b400"
 
     # Brief image_direction influences a subtle gradient angle for visual variety
@@ -161,7 +161,7 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
     aspect = _aspect_ratio_for(dims)
 
     brand_name = brand_kit.get("brand_name", "the brand")
-    brand_primary = (brand_kit.get("colours") or ["#1a73e8"])[0]
+    brand_primary = (brand_kit.get("colours") or ["#111111"])[0]
 
     # Partner colour wins for background if provided; else own brand primary.
     partner_colour = brief.get("_partner_primary_colour")

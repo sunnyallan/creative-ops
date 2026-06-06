@@ -11,9 +11,9 @@ router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 
 class CopyConstraints(BaseModel):
-    headline_max_chars: int = Field(60, ge=10, le=200)
-    body_max_chars: int = Field(120, ge=20, le=500)
-    cta_max_chars: int = Field(25, ge=5, le=60)
+    headline_max_chars: int = Field(30, ge=10, le=200)
+    body_max_chars: int = Field(50, ge=20, le=500)
+    cta_max_chars: int = Field(15, ge=5, le=60)
 
 
 class PartnerBrand(BaseModel):

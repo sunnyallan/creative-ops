@@ -13,7 +13,7 @@ export default function Onboarding() {
   const [brandName, setBrandName] = useState("");
   const [tone, setTone] = useState("");
   const [values, setValues] = useState("");
-  const [colours, setColours] = useState<string[]>(["#000000"]);
+  const [colours, setColours] = useState<string[]>([""]);
   const [logoFiles, setLogoFiles] = useState<File[]>([]);
   const [fontFiles, setFontFiles] = useState<File[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([{ name: "" }]);
@@ -118,9 +118,18 @@ export default function Onboarding() {
           <div>
             <span className="text-sm font-medium">Brand colours (hex)</span>
             {colours.map((c, i) => (
-              <input key={i} value={c} onChange={(e) => setColours(colours.map((x, j) => j === i ? e.target.value : x))} className="mt-1 mr-2 w-32 rounded-md border px-3 py-2" />
+              <span key={i} className="mr-2 inline-flex items-center gap-2">
+                <input type="color"
+                  value={c && c.startsWith("#") ? c : "#000000"}
+                  onChange={(e) => setColours(colours.map((x, j) => j === i ? e.target.value : x))}
+                  className="mt-1 h-9 w-12 rounded border" />
+                <input value={c}
+                  onChange={(e) => setColours(colours.map((x, j) => j === i ? e.target.value : x))}
+                  placeholder="#RRGGBB"
+                  className="mt-1 w-32 rounded-md border px-3 py-2" />
+              </span>
             ))}
-            <button onClick={() => setColours([...colours, "#ffffff"])} className="ml-2 text-sm text-blue-600">+ add</button>
+            <button onClick={() => setColours([...colours, ""])} className="ml-2 text-sm text-blue-600">+ add</button>
           </div>
           <label className="block">
             <span className="text-sm font-medium">Logo files (SVG/PNG)</span>

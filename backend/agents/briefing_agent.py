@@ -98,7 +98,7 @@ def generate_brief(state: BriefingState) -> BriefingState:
     channels = active_channels_for(UUID(state["tenant_id"]))
 
     constraints = state.get("copy_constraints") or {
-        "headline_max_chars": 60, "body_max_chars": 120, "cta_max_chars": 25,
+        "headline_max_chars": 30, "body_max_chars": 50, "cta_max_chars": 15,
     }
 
     channels_block = json.dumps(channels, indent=2)
@@ -219,9 +219,9 @@ def run_briefing(
                 "campaign_goal": goal,
                 "persona_segment": persona_segment,
                 "copy_constraints": copy_constraints or {
-                    "headline_max_chars": 60,
-                    "body_max_chars": 120,
-                    "cta_max_chars": 25,
+                    "headline_max_chars": 30,
+                    "body_max_chars": 50,
+                    "cta_max_chars": 15,
                 },
                 "partner_brand": partner_brand,
             },

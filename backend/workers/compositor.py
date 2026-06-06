@@ -84,24 +84,34 @@ def _parse_dims(dim_str: str) -> tuple[int, int]:
         return 1080, 1080
 
 
-_FONT_PATHS = [
-    "/usr/share/fonts/truetype/dejavu/{name}",
-    "/usr/share/fonts/dejavu/{name}",
-    "/Library/Fonts/{name}",
-    "{name}",  # last resort — Pillow's search
-]
+from pathlib import Path
+
+# Geist is bundled in the repo at backend/fonts. Falls back to DejaVu (installed
+# in the Docker image via apt) and Pillow's search if anything goes wrong.
+_BUNDLED_FONTS_DIR = Path(__file__).resolve().parent.parent / "fonts"
+
+_FONT_CANDIDATES = {
+    True: [  # bold
+        str(_BUNDLED_FONTS_DIR / "Geist-Bold.ttf"),
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "DejaVuSans-Bold.ttf",
+    ],
+    False: [  # regular
+        str(_BUNDLED_FONTS_DIR / "Geist-Regular.ttf"),
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "DejaVuSans.ttf",
+    ],
+}
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-    for p in _FONT_PATHS:
+    for path in _FONT_CANDIDATES[bold]:
         try:
-            return ImageFont.truetype(p.format(name=name), size)
+            return ImageFont.truetype(path, size)
         except OSError:
             continue
-    # Loud warning rather than silent bitmap fallback.
     import logging
-    logging.getLogger("compositor").warning("font %s not found; using PIL default (no size)", name)
+    logging.getLogger("compositor").warning("no truetype font found; using PIL default (no size)")
     return ImageFont.load_default()
 
 
@@ -239,7 +249,9 @@ def composite(
     }
     size = _parse_dims(dimensions)
     W, H = size
-    brand_hex = _safe_hex(brand_colour, "#1a73e8")
+    # Resolve CTA colour: template override → brand primary → neutral dark
+    cfg_cta_colour = (template_config or {}).get("cta_colour")
+    brand_hex = _safe_hex(cfg_cta_colour or brand_colour, "#111111")
     brand_rgb = _hex_rgb(brand_hex)
 
     # ---- 1. Centre-crop the base image to fill the canvas ----
