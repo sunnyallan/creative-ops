@@ -428,10 +428,23 @@ def composite(
 
         radius = pill_h // 2  # full pill curvature
 
-        text_fill = "white"
-        # Auto-flip CTA text colour if brand colour is too light to read white on.
-        if _contrast_ratio(brand_rgb, (255, 255, 255)) < 3.0:
+        # ----- Pick pill colours -----
+        # If the brand colour would get lost against the canvas behind the pill,
+        # flip to reverse (white pill + dark text). Otherwise use brand pill with
+        # text colour auto-picked for contrast against brand.
+        pill_bg_sample = _avg_rgb(canvas, (pill_x0, pill_y0, pill_x1, pill_y1))
+        brand_vs_bg = _contrast_ratio(brand_rgb, pill_bg_sample)
+
+        if brand_vs_bg < 2.5:
+            # Reverse mode — brand pill would blend into bg.
+            pill_fill = (255, 255, 255, 255)
             text_fill = "#111111"
+        else:
+            pill_fill = brand_rgb + (255,)
+            # Auto-flip text colour if brand colour is too light to read white on.
+            text_fill = "white"
+            if _contrast_ratio(brand_rgb, (255, 255, 255)) < 3.0:
+                text_fill = "#111111"
 
         if cfg["cta_style"] == "pill":
             # Subtle drop shadow (smaller offset, less opaque than before).
@@ -446,23 +459,25 @@ def composite(
             odraw = ImageDraw.Draw(overlay)
             odraw.rounded_rectangle(
                 [pill_x0, pill_y0, pill_x1, pill_y1],
-                radius=radius, fill=brand_rgb + (255,),
+                radius=radius, fill=pill_fill,
             )
             odraw.text((text_x_in_pill, text_y), cta_text, fill=text_fill, font=cta_font)
         elif cfg["cta_style"] == "square":
             odraw.rounded_rectangle(
                 [pill_x0, pill_y0, pill_x1, pill_y1],
-                radius=8, fill=brand_rgb + (255,),
+                radius=8, fill=pill_fill,
             )
             odraw.text((text_x_in_pill, text_y), cta_text, fill=text_fill, font=cta_font)
         elif cfg["cta_style"] == "underline":
-            # No pill — text only, brand-coloured, with underline beneath.
+            # No pill — text only, auto-contrast colour, with brand-coloured underline.
             _draw_text_with_shadow(
                 odraw, (text_x, text_y), cta_text, cta_font,
                 fill=text_hex, shadow=shadow,
             )
             underline_y = text_y + ascent + 4
-            odraw.line([text_x, underline_y, text_x + ctw, underline_y], fill=brand_hex, width=3)
+            # Underline uses brand colour unless it would be lost against bg, then text_hex.
+            underline_fill = brand_hex if brand_vs_bg >= 2.5 else text_hex
+            odraw.line([text_x, underline_y, text_x + ctw, underline_y], fill=underline_fill, width=3)
 
     # Merge band overlay onto canvas
     canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay)
