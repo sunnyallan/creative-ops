@@ -96,6 +96,25 @@ export default function ReviewPage() {
               <h3 className="font-medium">{c.headline}</h3>
               <p className="text-sm text-neutral-600 line-clamp-2">{c.body}</p>
               <p className="text-xs uppercase tracking-wide text-neutral-500">CTA: {c.cta}</p>
+              {c.governance_status === "flagged" && (() => {
+                const issues = Array.isArray(c.governance_issues?.issues)
+                  ? c.governance_issues.issues
+                  : Array.isArray(c.governance_issues)
+                  ? c.governance_issues
+                  : null;
+                return issues && issues.length > 0 ? (
+                  <details className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+                    <summary className="cursor-pointer font-medium">
+                      {issues.length} flag{issues.length === 1 ? "" : "s"} — click to expand
+                    </summary>
+                    <ul className="mt-1 list-disc pl-4 space-y-0.5">
+                      {issues.slice(0, 4).map((it: string, i: number) => (
+                        <li key={i}>{it}</li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null;
+              })()}
               <div className="flex gap-2 pt-2">
                 <button onClick={() => approve(c.id)} className="flex-1 rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white">
                   Approve
