@@ -169,13 +169,31 @@ def _title_band(position: str, size: tuple[int, int], band_h: int) -> tuple[int,
     return (0, h - band_h, w, h)
 
 
+def _is_svg(b: bytes) -> bool:
+    head = b[:512].lstrip().lower()
+    return head.startswith(b"<?xml") and b"<svg" in head[:1024] or head.startswith(b"<svg")
+
+
+def _svg_to_image(svg_bytes: bytes, target_w: int) -> Image.Image:
+    """Rasterise an SVG to an RGBA Image at the target pixel width."""
+    import cairosvg
+    png_bytes = cairosvg.svg2png(bytestring=svg_bytes, output_width=target_w)
+    return Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+
+
 def _prep_logo(logo_bytes: bytes, canvas_w: int, target_w_frac: float = 1/8) -> Image.Image | None:
+    if not logo_bytes:
+        return None
+    target_w = int(canvas_w * target_w_frac)
     try:
+        if _is_svg(logo_bytes):
+            return _svg_to_image(logo_bytes, target_w)
         logo = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
-        target_w = int(canvas_w * target_w_frac)
         ratio = target_w / logo.width
         return logo.resize((target_w, int(logo.height * ratio)), Image.LANCZOS)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("compositor").warning("logo prep failed: %s", e)
         return None
 
 
