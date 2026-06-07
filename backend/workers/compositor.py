@@ -309,11 +309,12 @@ def composite(
         # "auto" or "none" — text sits directly on the image
         text_hex, shadow = auto_text_hex, auto_shadow
 
-    # ---- 3. Headline + subtitle + CTA — content-driven layout ----
-    max_text_w = W - 2 * pad
+    # ---- 3. Headline + subtitle + CTA — LEFT-HALF text region ----
+    # Text sits in the left ~48% of the canvas (image is rendered into the right half by Nano Banana).
+    left_region_w = int(W * 0.48)
+    max_text_w = left_region_w - 2 * pad
 
     # Fixed pixel sizes so text reads identically across channels (Meta 1080² vs WhatsApp 1200×628).
-    # Padding still scales with canvas dimension so composition still feels balanced.
     head_font_size = 62
     head_font = _font(head_font_size, bold=True)
     sub_font_size = 30
@@ -353,40 +354,41 @@ def composite(
         cta_h = cta_visual_h + 2 * cta_py
     text_to_cta_gap = max(18, cta_font_size // 2)
 
-    # Compute required band height & re-position the band
+    # ---- Position the LEFT-HALF text region, vertically centred ----
     content_pad = max(20, pad // 2)
-    needed_h = head_h + head_to_sub_gap + sub_h + text_to_cta_gap + cta_h + 2 * content_pad
-    band_h = max(band_h, needed_h)
-    band_h = min(band_h, int(H * 0.5))
-    bx0, by0, bx1, by1 = _title_band(cfg.get("title_position", "bottom"), size, band_h)
+    text_block_h = head_h + head_to_sub_gap + sub_h + text_to_cta_gap + cta_h
 
-    # Re-sample background brightness for the new band
+    # Text region occupies the left ~48% of the canvas, vertically centred.
+    bx0 = 0
+    bx1 = left_region_w
+    region_top_y = (H - text_block_h) // 2
+    by0 = max(pad, region_top_y - content_pad)
+    by1 = min(H - pad, region_top_y + text_block_h + content_pad)
+
+    # Sample background where the text will sit (left half) to pick contrast colour.
     if bar in ("auto", "none"):
-        sampled_bg = _avg_rgb(canvas, (bx0, by0, bx1, by1))
+        sampled_bg = _avg_rgb(canvas, (bx0 + pad, by0, bx1 - pad, by1))
         text_hex, shadow = _pick_text_colour(sampled_bg)
 
-    # Redraw band fill if needed (gradient/solid_*). For auto/none, nothing to draw.
+    # title_bar overlays still draw across the full text region width if user picked them.
     if bar == "gradient":
-        # clear old overlay band by recreating overlay layer up to here
         overlay = Image.new("RGBA", size, (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
+        band_h = by1 - by0
         for i in range(band_h):
-            if cfg.get("title_position") == "top":
-                alpha = int(220 * ((band_h - i) / band_h))
-            else:
-                alpha = int(220 * (i / band_h))
+            alpha = int(180 * (1 - i / band_h))  # fade horizontally would need different logic; vertical fade for now
             odraw.rectangle([bx0, by0 + i, bx1, by0 + i + 1], fill=(0, 0, 0, alpha))
     elif bar == "solid_dark":
         overlay = Image.new("RGBA", size, (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
-        odraw.rectangle([bx0, by0, bx1, by1], fill=(0, 0, 0, 200))
+        odraw.rectangle([bx0, by0, bx1, by1], fill=(0, 0, 0, 180))
     elif bar == "solid_brand":
         overlay = Image.new("RGBA", size, (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
-        odraw.rectangle([bx0, by0, bx1, by1], fill=brand_rgb + (220,))
+        odraw.rectangle([bx0, by0, bx1, by1], fill=brand_rgb + (200,))
 
-    # ---- Layout content in the band ----
-    y = by0 + content_pad
+    # ---- Layout content vertically centred in the left region ----
+    y = region_top_y
     text_x = bx0 + pad
 
     # Headline
