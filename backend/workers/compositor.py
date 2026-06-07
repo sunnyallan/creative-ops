@@ -309,12 +309,22 @@ def composite(
         # "auto" or "none" — text sits directly on the image
         text_hex, shadow = auto_text_hex, auto_shadow
 
-    # ---- 3. Headline + subtitle + CTA — LEFT-HALF text region ----
-    # Text sits in the left ~48% of the canvas (image is rendered into the right half by Nano Banana).
-    left_region_w = int(W * 0.48)
-    max_text_w = left_region_w - 2 * pad
+    # ---- 3. Headline + subtitle + CTA — aspect-aware layout ----
+    # Square (≈1:1): image centred, text spans full canvas width at the bottom.
+    # Wide (>1.3): image right half, text in left ~55% at the bottom.
+    aspect = W / H
+    is_wide = aspect > 1.3
 
-    # Fixed pixel sizes so text reads identically across channels (Meta 1080² vs WhatsApp 1200×628).
+    if is_wide:
+        text_region_x0 = pad
+        text_region_x1 = int(W * 0.55) - pad // 2
+    else:
+        text_region_x0 = pad
+        text_region_x1 = W - pad
+
+    max_text_w = text_region_x1 - text_region_x0
+
+    # Fixed pixel sizes so text reads identically across channels.
     head_font_size = 62
     head_font = _font(head_font_size, bold=True)
     sub_font_size = 30
@@ -322,13 +332,15 @@ def composite(
     cta_font_size = 46
     cta_font = _font(cta_font_size, bold=True)
 
-    # Wrap copy
-    head_lines = _wrap(headline or "", head_font, max_text_w, odraw)[:2]
-    if headline and len(_wrap(headline, head_font, max_text_w, odraw)) > 2:
+    # Wrap copy — allow up to 3 lines for headline / 3 for body so we don't truncate good copy.
+    head_all = _wrap(headline or "", head_font, max_text_w, odraw)
+    head_lines = head_all[:3]
+    if len(head_all) > 3:
         head_lines[-1] = head_lines[-1].rstrip(".,;:") + "…"
 
-    sub_lines = _wrap(body or "", sub_font, max_text_w, odraw)[:2] if body else []
-    if body and len(_wrap(body, sub_font, max_text_w, odraw)) > 2:
+    sub_all = _wrap(body or "", sub_font, max_text_w, odraw) if body else []
+    sub_lines = sub_all[:3]
+    if len(sub_all) > 3:
         sub_lines[-1] = sub_lines[-1].rstrip(".,;:") + "…"
 
     # Line heights + gaps
@@ -354,29 +366,29 @@ def composite(
         cta_h = cta_visual_h + 2 * cta_py
     text_to_cta_gap = max(18, cta_font_size // 2)
 
-    # ---- Position the LEFT-HALF text region, vertically centred ----
+    # ---- Position the text block: BOTTOM-LEFT aligned ----
     content_pad = max(20, pad // 2)
     text_block_h = head_h + head_to_sub_gap + sub_h + text_to_cta_gap + cta_h
 
-    # Text region occupies the left ~48% of the canvas, vertically centred.
-    bx0 = 0
-    bx1 = left_region_w
-    region_top_y = (H - text_block_h) // 2
+    bottom_margin = max(pad, H // 14)  # space between text block and canvas bottom
+    region_top_y = H - bottom_margin - text_block_h
+    bx0 = text_region_x0 - pad
+    bx1 = text_region_x1 + pad
     by0 = max(pad, region_top_y - content_pad)
-    by1 = min(H - pad, region_top_y + text_block_h + content_pad)
+    by1 = H - bottom_margin + content_pad
 
-    # Sample background where the text will sit (left half) to pick contrast colour.
+    # Sample background where the text will sit to pick contrast colour.
     if bar in ("auto", "none"):
-        sampled_bg = _avg_rgb(canvas, (bx0 + pad, by0, bx1 - pad, by1))
+        sampled_bg = _avg_rgb(canvas, (text_region_x0, by0, text_region_x1, by1))
         text_hex, shadow = _pick_text_colour(sampled_bg)
 
-    # title_bar overlays still draw across the full text region width if user picked them.
+    # title_bar overlays still draw if user picked one.
     if bar == "gradient":
         overlay = Image.new("RGBA", size, (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
         band_h = by1 - by0
         for i in range(band_h):
-            alpha = int(180 * (1 - i / band_h))  # fade horizontally would need different logic; vertical fade for now
+            alpha = int(180 * (i / band_h))  # fade in from top to bottom
             odraw.rectangle([bx0, by0 + i, bx1, by0 + i + 1], fill=(0, 0, 0, alpha))
     elif bar == "solid_dark":
         overlay = Image.new("RGBA", size, (0, 0, 0, 0))
@@ -387,9 +399,9 @@ def composite(
         odraw = ImageDraw.Draw(overlay)
         odraw.rectangle([bx0, by0, bx1, by1], fill=brand_rgb + (200,))
 
-    # ---- Layout content vertically centred in the left region ----
+    # ---- Layout content bottom-anchored, left-aligned ----
     y = region_top_y
-    text_x = bx0 + pad
+    text_x = text_region_x0
 
     # Headline
     for ln in head_lines:
