@@ -382,22 +382,25 @@ def composite(
         sampled_bg = _avg_rgb(canvas, (text_region_x0, by0, text_region_x1, by1))
         text_hex, shadow = _pick_text_colour(sampled_bg)
 
-    # title_bar overlays still draw if user picked one.
+    # title_bar overlays draw ACROSS THE FULL CANVAS WIDTH (not just the text region)
+    # so they never crop awkwardly at the image/text boundary on wide layouts.
     if bar == "gradient":
         overlay = Image.new("RGBA", size, (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
-        band_h = by1 - by0
-        for i in range(band_h):
-            alpha = int(180 * (i / band_h))  # fade in from top to bottom
-            odraw.rectangle([bx0, by0 + i, bx1, by0 + i + 1], fill=(0, 0, 0, alpha))
+        # Fade from transparent at top of text region to opaque at canvas bottom.
+        grad_top = by0
+        grad_h = max(1, H - grad_top)
+        for i in range(grad_h):
+            alpha = int(180 * (i / grad_h))
+            odraw.rectangle([0, grad_top + i, W, grad_top + i + 1], fill=(0, 0, 0, alpha))
     elif bar == "solid_dark":
         overlay = Image.new("RGBA", size, (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
-        odraw.rectangle([bx0, by0, bx1, by1], fill=(0, 0, 0, 180))
+        odraw.rectangle([0, by0, W, H], fill=(0, 0, 0, 180))
     elif bar == "solid_brand":
         overlay = Image.new("RGBA", size, (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
-        odraw.rectangle([bx0, by0, bx1, by1], fill=brand_rgb + (200,))
+        odraw.rectangle([0, by0, W, H], fill=brand_rgb + (200,))
 
     # ---- Layout content bottom-anchored, left-aligned ----
     y = region_top_y
