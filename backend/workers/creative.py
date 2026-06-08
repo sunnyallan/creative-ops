@@ -26,7 +26,7 @@ from workers.celery_app import celery_app
 from workers.compositor import composite
 
 MODEL_PRO = "gemini-2.5-flash"
-MODEL_IMAGE = "gemini-2.5-flash-image"  # Nano Banana
+MODEL_IMAGE = "gemini-3-pro-image"  # Nano Banana Pro — ~3-4x cost, much better prompt adherence
 
 USE_FALLBACK = False
 # Set False when Gemini billing is enabled — uses real Nano Banana image gen.
