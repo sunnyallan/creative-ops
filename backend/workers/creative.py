@@ -201,6 +201,9 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
 
     prompt = (
         f"HERO BANNER for a partnership campaign.\n\n"
+        f"PERSONA & SCENE — this is THE most important part: {direction}\n"
+        f"Follow this scene description literally — the persona's lifestyle, mood, props, "
+        f"lighting, and styling should all come from this brief, not from generic templates.\n\n"
         f"SUBJECT: {subject_focus}.\n"
         f"DO NOT depict any credit card, debit card, payment card, or wallet.\n"
         f"DO NOT depict the brand '{brand_name}' as a product — '{brand_name}' branding will be "
