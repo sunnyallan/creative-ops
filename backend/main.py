@@ -1,7 +1,9 @@
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.brand_kit import router as brand_kit_router
+from api.brand_kit import router as brand_kit_router  # legacy — kept until Commit C
+from api.brand_references import router as brand_references_router
+from api.brands import router as brands_router
 from api.campaigns import router as campaigns_router
 from api.channels import router as channels_router
 from api.creatives import router as creatives_router
@@ -32,6 +34,8 @@ def me(user: CurrentUser = Depends(current_user)):
 
 
 app.include_router(brand_kit_router)
+app.include_router(brand_references_router)
+app.include_router(brands_router)
 app.include_router(campaigns_router)
 app.include_router(channels_router)
 app.include_router(creatives_router)

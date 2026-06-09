@@ -26,8 +26,10 @@ class PartnerBrand(BaseModel):
 
 class CampaignIn(BaseModel):
     goal: str
+    brand_id: UUID | None = None  # v2.0 — multi-brand
+    product_image_path: str | None = None  # v2.0 — optional hero product image
     persona_segment: str | None = None  # legacy single-persona, still supported
-    persona_segments: list[str] = Field(default_factory=list)  # NEW: multi
+    persona_segments: list[str] = Field(default_factory=list)  # multi
     copy_constraints: CopyConstraints = Field(default_factory=CopyConstraints)
     partner_brand: PartnerBrand | None = None
 
@@ -35,6 +37,8 @@ class CampaignIn(BaseModel):
 class CampaignOut(BaseModel):
     id: UUID
     goal: str
+    brand_id: UUID | None = None
+    product_image_path: str | None = None
     persona_segment: str | None
     persona_segments: list[str] = Field(default_factory=list)
     status: str
@@ -48,13 +52,23 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
     campaign_id = uuid4()
     partner_json = json.dumps(payload.partner_brand.model_dump()) if payload.partner_brand else None
     with tenant_connection(user.tenant_id) as conn:
+        # Resolve brand_id — explicit > most recent brand
+        brand_id = payload.brand_id
+        if brand_id is None:
+            row = conn.execute(
+                "SELECT id FROM brands WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 1",
+                (str(user.tenant_id),),
+            ).fetchone()
+            brand_id = row[0] if row else None
         conn.execute(
-            "insert into campaigns (id, tenant_id, goal, persona_segment, status, copy_constraints, partner_brand) "
-            "values (%s, %s, %s, %s, 'briefing', %s::jsonb, %s::jsonb)",
+            "insert into campaigns (id, tenant_id, brand_id, goal, persona_segment, status, "
+            "copy_constraints, partner_brand, product_image_path) "
+            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s::jsonb, %s)",
             (
-                str(campaign_id), str(user.tenant_id), payload.goal, payload.persona_segment,
+                str(campaign_id), str(user.tenant_id), str(brand_id) if brand_id else None,
+                payload.goal, payload.persona_segment,
                 json.dumps(payload.copy_constraints.model_dump()),
-                partner_json,
+                partner_json, payload.product_image_path,
             ),
         )
         # Auto-save / refresh the partner record so it's reusable next time
@@ -108,6 +122,8 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
 
     return CampaignOut(
         id=campaign_id, goal=payload.goal,
+        brand_id=brand_id,
+        product_image_path=payload.product_image_path,
         persona_segment=payload.persona_segment,
         persona_segments=payload.persona_segments,
         status="briefed", brief=all_briefs, copy_constraints=payload.copy_constraints,
@@ -119,7 +135,8 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
 def get_campaign(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
     with tenant_connection(user.tenant_id) as conn:
         row = conn.execute(
-            "SELECT id, goal, persona_segment, status, brief, copy_constraints, partner_brand FROM campaigns WHERE id = %s",
+            "SELECT id, goal, persona_segment, status, brief, copy_constraints, partner_brand, "
+            "brand_id, product_image_path FROM campaigns WHERE id = %s",
             (str(campaign_id),),
         ).fetchone()
     if not row:
@@ -128,5 +145,6 @@ def get_campaign(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
         id=row[0], goal=row[1], persona_segment=row[2], status=row[3], brief=row[4],
         copy_constraints=CopyConstraints(**row[5]) if row[5] else CopyConstraints(),
         partner_brand=PartnerBrand(**row[6]) if row[6] else None,
+        brand_id=row[7], product_image_path=row[8],
         persona_segments=list({b.get("persona_segment") for b in (row[4] or []) if b.get("persona_segment")}),
     )

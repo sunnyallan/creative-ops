@@ -6,7 +6,7 @@ celery_app = Celery(
     "creative_ops",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["workers.creative", "workers.governance"],
+    include=["workers.creative", "workers.governance", "workers.style_extractor"],
 )
 
 celery_app.conf.update(
