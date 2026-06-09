@@ -16,6 +16,7 @@ type Creative = {
   governance_issues: any;
   human_status: string;
   persona_segment: string | null;
+  brand_id?: string | null;
 };
 
 const REJECT_TAGS = ["wrong-tone", "off-brand-colour", "wrong-imagery", "copy-error", "other"];

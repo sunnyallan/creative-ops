@@ -5,10 +5,10 @@ export default function SettingsHome() {
     <main className="mx-auto max-w-2xl px-6 py-10">
       <h1 className="text-3xl font-semibold">Settings</h1>
       <div className="mt-6 space-y-3">
-        <Card href="/settings/template" title="Template" desc="Logo position, title bar, CTA style" />
-        <Card href="/settings/channels" title="Channels" desc="Custom sizes per channel" />
-        <Card href="/settings/partners" title="Partners" desc="Reusable co-brand partners" />
-        <Card href="/onboarding" title="Brand kit" desc="Brand name, colours, fonts, personas" />
+        <Card href="/brands" title="Brands" desc="Multiple brands per workspace — colours, personas, references" />
+        <Card href="/settings/template" title="Template" desc="Logo position, title bar, CTA style (tenant-wide)" />
+        <Card href="/settings/channels" title="Channels" desc="Custom sizes per channel (tenant-wide)" />
+        <Card href="/settings/partners" title="Partners" desc="Reusable co-brand partners (shared across brands)" />
       </div>
     </main>
   );
