@@ -39,9 +39,11 @@ def _client() -> genai.Client:
 
 
 def _brand_prefix(brand_kit: dict[str, Any]) -> str:
+    # Strip internal-only keys (prefixed with _) and stringify anything non-JSON-native.
+    public = {k: v for k, v in brand_kit.items() if not k.startswith("_")}
     return (
         "<BRAND_KIT>\n"
-        + json.dumps(brand_kit, indent=2, ensure_ascii=False)
+        + json.dumps(public, indent=2, ensure_ascii=False, default=str)
         + "\n</BRAND_KIT>\n\n"
         "You are the Creative Engine. Stay strictly on-brand. Reply only with JSON when asked.\n"
     )
@@ -80,7 +82,7 @@ def _load_brand(tenant_id: UUID, brand_id: UUID | None) -> dict[str, Any]:
     colours = [c for c in [row[4], row[5], row[6]] if c]
 
     return {
-        "brand_id": row[0],
+        "brand_id": str(row[0]),  # stringify so the whole dict can be json.dumps'd into prompts
         "brand_name": row[1],
         "tone": row[2],
         "values": row[3],

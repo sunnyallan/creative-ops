@@ -101,9 +101,10 @@ def analyse_persona(state: BriefingState) -> BriefingState:
 
 def _brand_prefix(brand_kit: dict[str, Any]) -> str:
     """Stable, cache-friendly prefix — brand kit JSON first, then instructions."""
+    public = {k: v for k, v in brand_kit.items() if not k.startswith("_")}
     return (
         "<BRAND_KIT>\n"
-        + json.dumps(brand_kit, indent=2, ensure_ascii=False)
+        + json.dumps(public, indent=2, ensure_ascii=False, default=str)
         + "\n</BRAND_KIT>\n\n"
         "You are the Intelligence Engine of an AI creative-ops platform. "
         "Stay strictly on-brand. Output only valid JSON when asked.\n"
