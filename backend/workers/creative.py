@@ -269,42 +269,61 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
     else:
         subject_focus = "a hero product or symbolic object that represents the campaign goal"
 
+    # Whether we have rich brand style guidance from reference banners.
+    has_rich_brand_style = len(brand_style) > 150
+
+    if has_rich_brand_style:
+        # Style description from references is the dominant signal.
+        bg_instruction = (
+            "BACKGROUND & PALETTE — derived from the BRAND STYLE above. Match the colour palette, "
+            "lighting, texture, and design language described in that style block. Do NOT default "
+            "to generic photographic scenes or stock-image aesthetics. The look and feel must read "
+            "as if it came from the same brand as the reference banners.\n"
+        )
+        empty_region_colour = "the background colour established by the BRAND STYLE"
+    else:
+        bg_instruction = (
+            f"BACKGROUND COLOUR: solid {bg_colour} fills the entire canvas as the dominant colour. "
+            f"Subtle depth via gentle radial gradient or soft drop shadow under the subject.\n"
+        )
+        empty_region_colour = f"solid {bg_colour}"
+
     prompt = (
         f"HERO BANNER for a partnership campaign.\n\n"
-        f"{product_block}"
-        f"{brand_block}"
-        f"PERSONA & SCENE — this is THE most important part: {direction}\n"
-        f"Follow this scene description literally — the persona's lifestyle, mood, props, "
-        f"lighting, and styling should all come from this brief, not from generic templates.\n\n"
-        f"SUBJECT: {subject_focus}.\n"
-        f"DO NOT depict any credit card, debit card, payment card, or wallet.\n"
-        f"DO NOT depict the brand '{brand_name}' as a product — '{brand_name}' branding will be "
-        f"added later as a small logo overlay in post-production; it must not appear inside the image.\n\n"
-        f"COMPOSITION — modern DTC advertising (Kapiva, Foxtale, Glossier aesthetic):\n"
-        f"• Hero subject takes 40–50% of the frame\n"
-        f"• Subject is FLOATING / placed on a flat solid colour background — NOT a photographic scene\n"
-        f"• BACKGROUND COLOUR: solid {bg_colour} fills the entire canvas as the dominant colour\n"
-        f"• Subtle depth: gentle radial gradient, soft drop shadow under the subject, "
-        f"or abstract shapes/circles in slightly lighter/darker tints of {bg_colour}\n"
-        f"• Subject lit cleanly (soft studio light), photographic quality, sharp focus\n"
-        f"• ASPECT-AWARE PLACEMENT — interpret based on the aspect ratio {aspect}:\n"
-        f"  - If 1:1 (square) — subject CENTRED, occupying the upper-centre to centre of the frame. "
-        f"Lower 35% of canvas is EMPTY solid {bg_colour} (reserved for headline + CTA text overlay).\n"
-        f"  - If wide (16:9, 2:1, etc.) — subject in the RIGHT HALF, vertically centred. "
-        f"Left 50% of canvas is EMPTY solid {bg_colour} (reserved for text).\n"
-        f"• Leave clean margins at the top-left and top-right corners for logo overlays.\n"
-        f"• The text overlay area (bottom on square / left on wide) MUST be clean solid colour: "
-        f"no subject parts, no shadows, no decoration.\n"
-        f"{partner_note}\n"
-        f"BRAND CONTEXT — {tone}. Audience: {persona}.\n"
-        f"CREATIVE DIRECTION — {direction}\n\n"
-        f"ABSOLUTE — DO NOT VIOLATE:\n"
-        f"• NO credit cards, debit cards, payment cards, wallets, or fintech imagery — only partner-category objects\n"
-        f"• NO photographic scene backgrounds (no rooms, gyms, offices, landscapes) — "
-        f"background must be the solid colour {bg_colour}\n"
-        f"• NO text, letters, words, numbers, watermarks, captions, signs, or labels anywhere in the image\n"
-        f"• Product packaging surfaces must be COMPLETELY blank\n"
-        f"• No fake brand names, no readable lettering of any kind"
+        # Brand style first — highest priority
+        + (f"=== BRAND STYLE — HIGHEST PRIORITY, FOLLOW LITERALLY ===\n"
+           f"The brand has its own visual language extracted from its existing reference banners. "
+           f"The generated image MUST look as if it came from the same brand. Replicate the "
+           f"colour palette, composition, lighting, mood, and design language described below.\n\n"
+           f"{brand_block}"
+           f"=== END BRAND STYLE ===\n\n" if has_rich_brand_style else brand_block)
+        + f"{product_block}"
+        + f"PERSONA & SCENE: {direction}\n"
+        + f"Adapt the brand style to this persona's mood, but never abandon the brand style itself.\n\n"
+        + f"SUBJECT: {subject_focus}.\n"
+        + f"DO NOT depict any credit card, debit card, payment card, or wallet.\n"
+        + f"DO NOT depict the brand '{brand_name}' as a product — '{brand_name}' branding will be "
+        + f"added later as a small logo overlay in post-production; it must not appear inside the image.\n\n"
+        + f"COMPOSITION:\n"
+        + f"• Hero subject takes 40–50% of the frame\n"
+        + bg_instruction
+        + f"• Subject lit cleanly (soft studio light), photographic-quality where the style calls for it, "
+          f"illustrative where the style calls for that\n"
+        + f"• ASPECT-AWARE PLACEMENT — interpret based on aspect ratio {aspect}:\n"
+        + f"  - If 1:1 (square) — subject CENTRED, occupying the upper-centre to centre of the frame. "
+          f"Lower 35% of canvas is EMPTY ({empty_region_colour}) — reserved for headline + CTA text overlay.\n"
+        + f"  - If wide (16:9, 2:1, etc.) — subject in the RIGHT HALF, vertically centred. "
+          f"Left 50% of canvas is EMPTY ({empty_region_colour}) — reserved for text.\n"
+        + f"• Leave clean margins at the top-left and top-right corners for logo overlays.\n"
+        + f"• The text overlay area (bottom on square / left on wide) MUST be uncluttered: "
+          f"no subject parts, no shadows, no decoration intruding into it.\n"
+        + f"{partner_note}\n"
+        + f"BRAND CONTEXT — {tone}. Audience: {persona}.\n\n"
+        + f"ABSOLUTE — DO NOT VIOLATE:\n"
+        + f"• NO credit cards, debit cards, payment cards, wallets, or fintech imagery\n"
+        + f"• NO text, letters, words, numbers, watermarks, captions, signs, or labels anywhere in the image\n"
+        + f"• Product packaging surfaces must be COMPLETELY blank\n"
+        + f"• No fake brand names, no readable lettering of any kind"
     )
     # If a product image was provided, pass it as image input alongside the text prompt
     # so Nano Banana Pro uses it as the actual hero subject.
