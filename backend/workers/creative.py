@@ -47,19 +47,57 @@ def _brand_prefix(brand_kit: dict[str, Any]) -> str:
     )
 
 
-def _load_brand_kit(tenant_id: UUID) -> dict[str, Any]:
+def _load_brand(tenant_id: UUID, brand_id: UUID | None) -> dict[str, Any]:
+    """Load a brand row (and tenant template config). Falls back to the most
+    recent brand if brand_id is None (legacy campaigns or partial migration)."""
     with tenant_connection(tenant_id) as conn:
-        row = conn.execute(
-            "SELECT brand_name, tone, values, colours, fonts, logo_paths, persona_definitions, template_config "
-            "FROM brand_kits WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 1",
+        if brand_id:
+            row = conn.execute(
+                "SELECT id, name, tone, brand_values, primary_colour, secondary_colour, accent_colour, "
+                "heading_font, body_font, logo_path, persona_definitions, brand_rules_do, brand_rules_dont, "
+                "brand_feel, style_description "
+                "FROM brands WHERE id = %s AND tenant_id = %s",
+                (str(brand_id), str(tenant_id)),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id, name, tone, brand_values, primary_colour, secondary_colour, accent_colour, "
+                "heading_font, body_font, logo_path, persona_definitions, brand_rules_do, brand_rules_dont, "
+                "brand_feel, style_description "
+                "FROM brands WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 1",
+                (str(tenant_id),),
+            ).fetchone()
+        if not row:
+            raise RuntimeError("brand not found — create one at /brands/new")
+        # Template config is tenant-wide
+        tcfg_row = conn.execute(
+            "SELECT template_config FROM tenants WHERE id = %s",
             (str(tenant_id),),
         ).fetchone()
-    if not row:
-        raise RuntimeError("brand kit not found")
+        template_config = (tcfg_row[0] if tcfg_row else None) or {}
+
+    # Synthesise a "colours" array from primary/secondary/accent for compatibility
+    colours = [c for c in [row[4], row[5], row[6]] if c]
+
     return {
-        "brand_name": row[0], "tone": row[1], "values": row[2],
-        "colours": row[3], "fonts": row[4], "logo_paths": row[5],
-        "persona_definitions": row[6], "template_config": row[7],
+        "brand_id": row[0],
+        "brand_name": row[1],
+        "tone": row[2],
+        "values": row[3],
+        "primary_colour": row[4],
+        "secondary_colour": row[5],
+        "accent_colour": row[6],
+        "colours": colours,
+        "heading_font": row[7],
+        "body_font": row[8],
+        "logo_path": row[9],
+        "logo_paths": [row[9]] if row[9] else [],  # legacy array shape for compositor
+        "persona_definitions": row[10] or [],
+        "brand_rules_do": row[11],
+        "brand_rules_dont": row[12],
+        "brand_feel": row[13],
+        "style_description": row[14],
+        "template_config": template_config,
     }
 
 
@@ -179,6 +217,36 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
             f"it never changes WHICH object is shown. Object type is locked to {partner_name}'s category.\n"
         )
 
+    # ----- Brand-level constraints injected into the prompt -----
+    brand_style = (brand_kit.get("style_description") or "").strip()
+    rules_do = (brand_kit.get("brand_rules_do") or "").strip()
+    rules_dont = (brand_kit.get("brand_rules_dont") or "").strip()
+    brand_feel = (brand_kit.get("brand_feel") or "").strip()
+
+    brand_block = ""
+    if brand_style or rules_do or rules_dont or brand_feel:
+        parts = []
+        if brand_feel:
+            parts.append(f"BRAND FEEL: {brand_feel}")
+        if brand_style:
+            parts.append(f"BRAND STYLE (from your reference banners):\n{brand_style}")
+        if rules_do:
+            parts.append(f"BRAND RULES — WHAT WE CAN DO:\n{rules_do}")
+        if rules_dont:
+            parts.append(f"BRAND RULES — WHAT TO AVOID:\n{rules_dont}")
+        brand_block = "\n\n".join(parts) + "\n\n"
+
+    # ----- Product-image conditioning -----
+    product_image_bytes = brief.get("_product_image_bytes")
+    product_block = ""
+    if product_image_bytes:
+        product_block = (
+            "USE THE PROVIDED IMAGE AS THE HERO SUBJECT.\n"
+            "Preserve its exact shape, colour, materials, proportions, and identity. "
+            "Do not redraw or restyle the subject — only generate the background and supporting "
+            "scene around it.\n\n"
+        )
+
     if partner_name and partner_products:
         subject_focus = (
             f"a hero object representing ONE of {partner_name}'s actual transactable products: "
@@ -201,6 +269,8 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
 
     prompt = (
         f"HERO BANNER for a partnership campaign.\n\n"
+        f"{product_block}"
+        f"{brand_block}"
         f"PERSONA & SCENE — this is THE most important part: {direction}\n"
         f"Follow this scene description literally — the persona's lifestyle, mood, props, "
         f"lighting, and styling should all come from this brief, not from generic templates.\n\n"
@@ -234,10 +304,27 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
         f"• Product packaging surfaces must be COMPLETELY blank\n"
         f"• No fake brand names, no readable lettering of any kind"
     )
+    # If a product image was provided, pass it as image input alongside the text prompt
+    # so Nano Banana Pro uses it as the actual hero subject.
+    if product_image_bytes:
+        # Detect MIME by header bytes (PNG, JPEG, WebP)
+        product_mime = "image/png"
+        head = product_image_bytes[:12]
+        if head[:3] == b"\xff\xd8\xff":
+            product_mime = "image/jpeg"
+        elif head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            product_mime = "image/webp"
+        contents = [
+            genai_types.Part.from_bytes(data=product_image_bytes, mime_type=product_mime),
+            prompt,
+        ]
+    else:
+        contents = prompt
+
     client = _client()  # hold strong ref so finalizer doesn't close httpx mid-call
     resp = client.models.generate_content(
         model=MODEL_IMAGE,
-        contents=prompt,
+        contents=contents,
         config=genai_types.GenerateContentConfig(
             response_modalities=["IMAGE"],
             image_config=genai_types.ImageConfig(aspect_ratio=aspect),
@@ -263,11 +350,11 @@ def _gen_image_fallback(prompt: str) -> bytes:
 def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str:
     """Generate one creative for campaign[brief_index]."""
     t_uuid = UUID(tenant_id)
-    brand_kit = _load_brand_kit(t_uuid)
 
     with tenant_connection(t_uuid) as conn:
         row = conn.execute(
-            "SELECT brief, copy_constraints, partner_brand FROM campaigns WHERE id = %s AND tenant_id = %s",
+            "SELECT brief, copy_constraints, partner_brand, brand_id, product_image_path "
+            "FROM campaigns WHERE id = %s AND tenant_id = %s",
             (campaign_id, str(t_uuid)),
         ).fetchone()
     if not row or not row[0]:
@@ -276,6 +363,20 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
     brief = briefs[brief_index]
     copy_constraints = row[1] or {}
     partner_brand: dict | None = row[2]
+    campaign_brand_id = row[3]
+    product_image_path = row[4]
+
+    brand_kit = _load_brand(t_uuid, campaign_brand_id)
+
+    # Load product image if present
+    product_image_bytes: bytes | None = None
+    if product_image_path:
+        try:
+            product_image_bytes = download_bytes(product_image_path)
+        except Exception as e:
+            import logging
+            logging.getLogger("creative").warning("product image load failed: %s", e)
+    brief["_product_image_bytes"] = product_image_bytes
 
     # Resolve partner info BEFORE image gen so prompt can use it
     partner_logo_bytes: bytes | None = None
@@ -329,13 +430,15 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
     with tenant_connection(t_uuid) as conn:
         conn.execute(
             """
-            insert into creatives (id, tenant_id, campaign_id, channel, dimensions,
+            insert into creatives (id, tenant_id, campaign_id, brand_id, channel, dimensions,
                                    copy_headline, copy_body, copy_cta, storage_path,
                                    governance_status, human_status, persona_segment)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s)
             """,
             (
-                str(creative_id), str(t_uuid), campaign_id, brief["channel"], brief["dimensions"],
+                str(creative_id), str(t_uuid), campaign_id,
+                str(campaign_brand_id) if campaign_brand_id else None,
+                brief["channel"], brief["dimensions"],
                 copy.get("headline"), copy.get("body"), copy.get("cta"), path,
                 brief.get("persona_segment"),
             ),

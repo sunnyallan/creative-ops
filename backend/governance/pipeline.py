@@ -112,17 +112,28 @@ def _gemini_judge(image_bytes: bytes, brand_kit: dict[str, Any], brief: dict[str
 def evaluate(tenant_id: UUID, creative_id: UUID) -> dict[str, Any]:
     with tenant_connection(tenant_id) as conn:
         crow = conn.execute(
-            "SELECT storage_path, copy_headline, copy_body, copy_cta, channel, dimensions, campaign_id "
+            "SELECT storage_path, copy_headline, copy_body, copy_cta, channel, dimensions, campaign_id, brand_id "
             "FROM creatives WHERE id = %s",
             (str(creative_id),),
         ).fetchone()
         if not crow:
             raise RuntimeError("creative not found")
-        bk_row = conn.execute(
-            "SELECT brand_name, tone, values, colours, fonts, logo_paths, persona_definitions "
-            "FROM brand_kits WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 1",
-            (str(tenant_id),),
-        ).fetchone()
+        # Load brand by creative.brand_id (preferred) or fall back to the tenant's most-recent brand.
+        creative_brand_id = crow[7]
+        if creative_brand_id:
+            bk_row = conn.execute(
+                "SELECT name, tone, brand_values, primary_colour, secondary_colour, accent_colour, "
+                "logo_path, persona_definitions, brand_rules_do, brand_rules_dont, brand_feel, style_description "
+                "FROM brands WHERE id = %s AND tenant_id = %s",
+                (str(creative_brand_id), str(tenant_id)),
+            ).fetchone()
+        else:
+            bk_row = conn.execute(
+                "SELECT name, tone, brand_values, primary_colour, secondary_colour, accent_colour, "
+                "logo_path, persona_definitions, brand_rules_do, brand_rules_dont, brand_feel, style_description "
+                "FROM brands WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 1",
+                (str(tenant_id),),
+            ).fetchone()
         camp = conn.execute(
             "SELECT brief FROM campaigns WHERE id = %s", (str(crow[6]),),
         ).fetchone()
@@ -130,11 +141,21 @@ def evaluate(tenant_id: UUID, creative_id: UUID) -> dict[str, Any]:
     storage_path = crow[0]
     copy = {"headline": crow[1], "body": crow[2], "cta": crow[3]}
     channel = crow[4]
-    brand_kit = {
-        "brand_name": bk_row[0], "tone": bk_row[1], "values": bk_row[2],
-        "colours": bk_row[3], "fonts": bk_row[4], "logo_paths": bk_row[5],
-        "persona_definitions": bk_row[6],
-    }
+    if bk_row:
+        brand_kit = {
+            "brand_name": bk_row[0],
+            "tone": bk_row[1],
+            "values": bk_row[2],
+            "colours": [c for c in [bk_row[3], bk_row[4], bk_row[5]] if c],
+            "logo_paths": [bk_row[6]] if bk_row[6] else [],
+            "persona_definitions": bk_row[7] or [],
+            "brand_rules_do": bk_row[8],
+            "brand_rules_dont": bk_row[9],
+            "brand_feel": bk_row[10],
+            "style_description": bk_row[11],
+        }
+    else:
+        brand_kit = {"brand_name": "Unknown", "colours": [], "logo_paths": [], "persona_definitions": []}
     briefs = camp[0] if camp and camp[0] else []
     brief = next((b for b in briefs if b.get("channel") == channel), briefs[0] if briefs else {})
 

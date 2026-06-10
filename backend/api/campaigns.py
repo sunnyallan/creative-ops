@@ -102,6 +102,7 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
             user.tenant_id, campaign_id, payload.goal, persona,
             payload.copy_constraints.model_dump(),
             partner_brand=(payload.partner_brand.model_dump() if payload.partner_brand else None),
+            brand_id=brand_id,
         )
         # Tag each brief with its persona so the worker can find it
         for b in per_persona_briefs:

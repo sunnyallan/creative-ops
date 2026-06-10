@@ -31,6 +31,7 @@ MODEL_FLASH_LITE = "gemini-2.5-flash-lite"
 
 class BriefingState(TypedDict, total=False):
     tenant_id: str
+    brand_id: str | None
     campaign_id: str
     campaign_goal: str
     persona_segment: str | None
@@ -47,19 +48,40 @@ def _client() -> genai.Client:
 
 def read_brand_kit(state: BriefingState) -> BriefingState:
     tenant_id = UUID(state["tenant_id"])
+    brand_id = state.get("brand_id")
     with tenant_connection(tenant_id) as conn:
-        cur = conn.execute(
-            "SELECT brand_name, tone, values, colours, fonts, logo_paths, persona_definitions "
-            "FROM brand_kits WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 1",
-            (str(tenant_id),),
-        )
+        if brand_id:
+            cur = conn.execute(
+                "SELECT name, tone, brand_values, primary_colour, secondary_colour, accent_colour, "
+                "logo_path, persona_definitions, brand_rules_do, brand_rules_dont, brand_feel, style_description "
+                "FROM brands WHERE id = %s AND tenant_id = %s",
+                (str(brand_id), str(tenant_id)),
+            )
+        else:
+            cur = conn.execute(
+                "SELECT name, tone, brand_values, primary_colour, secondary_colour, accent_colour, "
+                "logo_path, persona_definitions, brand_rules_do, brand_rules_dont, brand_feel, style_description "
+                "FROM brands WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 1",
+                (str(tenant_id),),
+            )
         row = cur.fetchone()
     if not row:
-        raise RuntimeError("brand kit not found — complete onboarding first")
+        raise RuntimeError("brand not found — create one at /brands/new first")
+    colours = [c for c in [row[3], row[4], row[5]] if c]
     brand_kit = {
-        "brand_name": row[0], "tone": row[1], "values": row[2],
-        "colours": row[3], "fonts": row[4], "logo_paths": row[5],
-        "persona_definitions": row[6],
+        "brand_name": row[0],
+        "tone": row[1],
+        "values": row[2],
+        "primary_colour": row[3],
+        "secondary_colour": row[4],
+        "accent_colour": row[5],
+        "colours": colours,
+        "logo_paths": [row[6]] if row[6] else [],
+        "persona_definitions": row[7] or [],
+        "brand_rules_do": row[8],
+        "brand_rules_dont": row[9],
+        "brand_feel": row[10],
+        "style_description": row[11],
     }
     return {**state, "brand_kit": brand_kit}
 
@@ -136,8 +158,21 @@ def generate_brief(state: BriefingState) -> BriefingState:
             f"partner doesn't sell. NEVER suggest credit card, debit card, wallet, or payment-card imagery.\n"
         )
 
+    # Brand-level constraints (do/dont/feel) prepended to the brief prompt
+    brand_rules_block = ""
+    brand_do = (brand_kit.get("brand_rules_do") or "").strip()
+    brand_dont = (brand_kit.get("brand_rules_dont") or "").strip()
+    brand_feel = (brand_kit.get("brand_feel") or "").strip()
+    if brand_do or brand_dont or brand_feel:
+        bits = []
+        if brand_feel: bits.append(f"BRAND FEEL: {brand_feel}")
+        if brand_do: bits.append(f"BRAND CAN DO:\n{brand_do}")
+        if brand_dont: bits.append(f"BRAND MUST AVOID:\n{brand_dont}")
+        brand_rules_block = "\n\n".join(bits) + "\n\nReflect these in tone, image_direction, copy, and cta.\n\n"
+
     prompt = (
         _brand_prefix(brand_kit)
+        + brand_rules_block
         + "TASK: Produce a structured creative brief as a JSON array. "
         "One object per channel in CHANNELS. Each object must have: "
         "channel, dimensions, copy_brief, persona_segment, tone, image_direction, cta.\n"
@@ -225,6 +260,7 @@ def run_briefing(
     persona_segment: str | None,
     copy_constraints: dict[str, int] | None = None,
     partner_brand: dict[str, Any] | None = None,
+    brand_id: UUID | None = None,
 ) -> list[dict[str, Any]]:
     """Synchronous helper invoked from API or Celery task."""
     with PostgresSaver.from_conn_string(settings.supabase_db_url) as saver:
@@ -234,6 +270,7 @@ def run_briefing(
         result = graph.invoke(
             {
                 "tenant_id": str(tenant_id),
+                "brand_id": str(brand_id) if brand_id else None,
                 "campaign_id": str(campaign_id),
                 "campaign_goal": goal,
                 "persona_segment": persona_segment,
