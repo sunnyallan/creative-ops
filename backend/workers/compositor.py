@@ -520,5 +520,7 @@ def composite(
             pass
 
     out = io.BytesIO()
-    canvas.convert("RGB").save(out, format="PNG", optimize=True)
+    # WebP @ q82 — ~10× smaller than PNG at equivalent perceived quality.
+    # method=6 = slowest/best compression (still fast for our canvases).
+    canvas.convert("RGB").save(out, format="WEBP", quality=82, method=6)
     return out.getvalue()

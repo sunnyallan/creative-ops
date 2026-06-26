@@ -272,8 +272,30 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
     # Whether we have rich brand style guidance from reference banners.
     has_rich_brand_style = len(brand_style) > 150
 
+    # Heuristic — detect non-photographic style cues in the brand style description.
+    # If the brand is illustrative/vector/pastel/iconographic, we explicitly suppress
+    # Nano Banana Pro's photographic-stock default.
+    style_lower = brand_style.lower()
+    illustrative_cues = [
+        "illustrat", "vector", "icon", "flat design", "minimal", "pastel",
+        "doodle", "sketch", "graphic", "infograph", "geometric", "abstract shape",
+        "wireframe", "mockup", "phone screen", "ui screenshot",
+    ]
+    is_illustrative_brand = has_rich_brand_style and any(c in style_lower for c in illustrative_cues)
+
+    anti_photo_override = ""
+    if is_illustrative_brand:
+        anti_photo_override = (
+            "\nSTYLE OVERRIDE — THIS BRAND IS NOT PHOTOGRAPHIC.\n"
+            "Do NOT generate stock photography. Do NOT use real human models, real hands, "
+            "real laptops, real office scenes, real food shots, or photographic textures unless the "
+            "BRAND STYLE above explicitly calls for them. Match the BRAND STYLE's aesthetic — "
+            "if it's illustrative/vector/flat, output illustrative/vector/flat. If it features "
+            "iPhone/UI mockups + floating decorative elements, output that. Treat photographic "
+            "realism as a forbidden default.\n"
+        )
+
     if has_rich_brand_style:
-        # Style description from references is the dominant signal.
         bg_instruction = (
             "BACKGROUND & PALETTE — derived from the BRAND STYLE above. Match the colour palette, "
             "lighting, texture, and design language described in that style block. Do NOT default "
@@ -290,12 +312,14 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
 
     prompt = (
         f"HERO BANNER for a partnership campaign.\n\n"
-        # Brand style first — highest priority
-        + (f"=== BRAND STYLE — HIGHEST PRIORITY, FOLLOW LITERALLY ===\n"
-           f"The brand has its own visual language extracted from its existing reference banners. "
+        # Brand style first — highest priority, made un-overridable
+        + (f"=== BRAND STYLE — ABSOLUTE LAW, OVERRIDES ALL DEFAULTS ===\n"
+           f"This brand has a specific visual language extracted from its actual reference banners. "
            f"The generated image MUST look as if it came from the same brand. Replicate the "
-           f"colour palette, composition, lighting, mood, and design language described below.\n\n"
+           f"colour palette, composition, lighting, mood, and design language described below "
+           f"EXACTLY. If anything that follows contradicts this style, this style WINS.\n\n"
            f"{brand_block}"
+           f"{anti_photo_override}"
            f"=== END BRAND STYLE ===\n\n" if has_rich_brand_style else brand_block)
         + f"{product_block}"
         + f"PERSONA & SCENE: {direction}\n"
@@ -307,8 +331,8 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
         + f"COMPOSITION:\n"
         + f"• Hero subject takes 40–50% of the frame\n"
         + bg_instruction
-        + f"• Subject lit cleanly (soft studio light), photographic-quality where the style calls for it, "
-          f"illustrative where the style calls for that\n"
+        + f"• Render in the medium dictated by the BRAND STYLE above "
+          f"(photographic, illustrative, vector, flat — whatever the brand actually uses)\n"
         + f"• ASPECT-AWARE PLACEMENT — interpret based on aspect ratio {aspect}:\n"
         + f"  - If 1:1 (square) — subject CENTRED, occupying the upper-centre to centre of the frame. "
           f"Lower 35% of canvas is EMPTY ({empty_region_colour}) — reserved for headline + CTA text overlay.\n"
@@ -445,8 +469,8 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
     )
 
     creative_id = uuid.uuid4()
-    path = f"tenants/{tenant_id}/creatives/{campaign_id}/{creative_id}.png"
-    upload_bytes(path, composed, "image/png")
+    path = f"tenants/{tenant_id}/creatives/{campaign_id}/{creative_id}.webp"
+    upload_bytes(path, composed, "image/webp")
 
     with tenant_connection(t_uuid) as conn:
         conn.execute(
