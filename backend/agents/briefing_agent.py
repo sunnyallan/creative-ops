@@ -40,6 +40,9 @@ class BriefingState(TypedDict, total=False):
     brand_kit: dict[str, Any]
     existing_similar: list[dict[str, Any]]
     output_brief: list[dict[str, Any]]
+    content_type: str  # banner | social_post | social_carousel
+    research_notes: str | None
+    carousel_slide_count: int
 
 
 def _client() -> genai.Client:
@@ -115,10 +118,21 @@ def generate_brief(state: BriefingState) -> BriefingState:
     brand_kit = state["brand_kit"]
     persona = brand_kit.get("_active_persona") or {"name": state.get("persona_segment", "general")}
     goal = state["campaign_goal"]
+    content_type = state.get("content_type", "banner")
+    research_notes = (state.get("research_notes") or "").strip()
+    carousel_slide_count = int(state.get("carousel_slide_count") or 1)
 
-    # Pull channels from tenant config (with built-in defaults merged in)
+    # Pull channels for this content_type
     from api.channels import active_channels_for
-    channels = active_channels_for(UUID(state["tenant_id"]))
+    channels = active_channels_for(UUID(state["tenant_id"]), content_type=content_type)
+
+    # For carousels, multiply the single slide template by slide count
+    if content_type == "social_carousel" and channels:
+        slide_template = channels[0]
+        channels = [
+            {**slide_template, "channel": f"{slide_template['channel']}_{i}", "slide_index": i, "total_slides": carousel_slide_count}
+            for i in range(carousel_slide_count)
+        ]
 
     constraints = state.get("copy_constraints") or {
         "headline_max_chars": 30, "body_max_chars": 50, "cta_max_chars": 15,
@@ -159,6 +173,32 @@ def generate_brief(state: BriefingState) -> BriefingState:
             f"partner doesn't sell. NEVER suggest credit card, debit card, wallet, or payment-card imagery.\n"
         )
 
+    # Content-type framing — banner vs social post vs carousel
+    if content_type == "social_post":
+        content_framing = (
+            "CONTENT TYPE: SOCIAL POST. This is a single-image social-media post (Instagram-style), "
+            "NOT a partnership banner. Copy should feel conversational, native to feed, with a hook + "
+            "1-2 supporting lines + soft CTA. Avoid hard-sell partnership framing.\n\n"
+        )
+    elif content_type == "social_carousel":
+        content_framing = (
+            f"CONTENT TYPE: SOCIAL CAROUSEL ({carousel_slide_count} slides). Plan a connected story:\n"
+            f"  • Slide 1 (slide_index=0): HOOK — a question, surprising fact, or attention-grab\n"
+            f"  • Slides 2 to {carousel_slide_count - 1}: CONTENT POINTS — one idea per slide, building progression\n"
+            f"  • Last slide (slide_index={carousel_slide_count - 1}): CTA — call to action, brand sign-off\n"
+            f"All slides MUST share the same colour palette and visual layout so they feel like one set. "
+            f"Each slide's image_direction should reference a consistent background palette and decorative motifs.\n\n"
+        )
+    else:
+        content_framing = "CONTENT TYPE: BANNER. Partnership/promotional banner copy.\n\n"
+
+    research_block = ""
+    if research_notes:
+        research_block = (
+            f"RESEARCH NOTES (background on the topic — use these to ground the copy in real facts):\n"
+            f"{research_notes}\n\n"
+        )
+
     # Brand-level constraints (do/dont/feel) prepended to the brief prompt
     brand_rules_block = ""
     brand_do = (brand_kit.get("brand_rules_do") or "").strip()
@@ -171,13 +211,20 @@ def generate_brief(state: BriefingState) -> BriefingState:
         if brand_dont: bits.append(f"BRAND MUST AVOID:\n{brand_dont}")
         brand_rules_block = "\n\n".join(bits) + "\n\nReflect these in tone, image_direction, copy, and cta.\n\n"
 
+    extra_brief_fields = ""
+    if content_type == "social_carousel":
+        extra_brief_fields = "Each object MUST also include: slide_index (0..N-1), slide_role (hook|point|cta).\n"
+
     prompt = (
         _brand_prefix(brand_kit)
+        + content_framing
+        + research_block
         + brand_rules_block
         + "TASK: Produce a structured creative brief as a JSON array. "
         "One object per channel in CHANNELS. Each object must have: "
         "channel, dimensions, copy_brief, persona_segment, tone, image_direction, cta.\n"
-        f"Respect copy length limits — headline ≤ {constraints['headline_max_chars']} chars, "
+        + extra_brief_fields
+        + f"Respect copy length limits — headline ≤ {constraints['headline_max_chars']} chars, "
         f"body ≤ {constraints['body_max_chars']} chars, cta ≤ {constraints['cta_max_chars']} chars.\n\n"
         "CRITICAL — image_direction must reflect THIS PERSONA in concrete detail.\n"
         "Read the persona's age_range, income_tier, lifestyle, and preferred_imagery fields. "
@@ -262,6 +309,9 @@ def run_briefing(
     copy_constraints: dict[str, int] | None = None,
     partner_brand: dict[str, Any] | None = None,
     brand_id: UUID | None = None,
+    content_type: str = "banner",
+    research_notes: str | None = None,
+    carousel_slide_count: int = 1,
 ) -> list[dict[str, Any]]:
     """Synchronous helper invoked from API or Celery task."""
     with PostgresSaver.from_conn_string(settings.supabase_db_url) as saver:
@@ -281,6 +331,9 @@ def run_briefing(
                     "cta_max_chars": 15,
                 },
                 "partner_brand": partner_brand,
+                "content_type": content_type,
+                "research_notes": research_notes,
+                "carousel_slide_count": carousel_slide_count,
             },
             config=thread,
         )

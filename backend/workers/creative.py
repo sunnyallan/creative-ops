@@ -351,18 +351,31 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
     )
     # If a product image was provided, pass it as image input alongside the text prompt
     # so Nano Banana Pro uses it as the actual hero subject.
+    carousel_anchor_bytes = brief.get("_carousel_anchor_bytes")
+    image_inputs: list[bytes] = []
     if product_image_bytes:
-        # Detect MIME by header bytes (PNG, JPEG, WebP)
-        product_mime = "image/png"
-        head = product_image_bytes[:12]
-        if head[:3] == b"\xff\xd8\xff":
-            product_mime = "image/jpeg"
-        elif head[:4] == b"RIFF" and head[8:12] == b"WEBP":
-            product_mime = "image/webp"
+        image_inputs.append(product_image_bytes)
+    if carousel_anchor_bytes:
+        image_inputs.append(carousel_anchor_bytes)
+        # Append carousel-coherence instruction to prompt
+        prompt = (
+            prompt
+            + "\n\nCAROUSEL COHERENCE: an additional image is provided showing slide 1 of this set. "
+            "Match its colour palette, background style, decorative motifs, and overall composition "
+            "EXACTLY. This slide must look like part of the same set — different copy, but consistent "
+            "visual world."
+        )
+
+    def _mime(b: bytes) -> str:
+        head = b[:12]
+        if head[:3] == b"\xff\xd8\xff": return "image/jpeg"
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP": return "image/webp"
+        return "image/png"
+
+    if image_inputs:
         contents = [
-            genai_types.Part.from_bytes(data=product_image_bytes, mime_type=product_mime),
-            prompt,
-        ]
+            genai_types.Part.from_bytes(data=b, mime_type=_mime(b)) for b in image_inputs
+        ] + [prompt]
     else:
         contents = prompt
 
@@ -398,7 +411,8 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
 
     with tenant_connection(t_uuid) as conn:
         row = conn.execute(
-            "SELECT brief, copy_constraints, partner_brand, brand_id, product_image_path "
+            "SELECT brief, copy_constraints, partner_brand, brand_id, product_image_path, "
+            "content_type, carousel_slide_count "
             "FROM campaigns WHERE id = %s AND tenant_id = %s",
             (campaign_id, str(t_uuid)),
         ).fetchone()
@@ -410,8 +424,40 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
     partner_brand: dict | None = row[2]
     campaign_brand_id = row[3]
     product_image_path = row[4]
+    content_type = row[5] or "banner"
+    slide_count = row[6] or 1
 
     brand_kit = _load_brand(t_uuid, campaign_brand_id)
+
+    # ----- Anchored carousel coherence -----
+    # For carousels, slides 2..N receive slide 0's PNG as a visual anchor so the
+    # whole set shares palette + composition. Slide 0 has no anchor.
+    slide_index = int(brief.get("slide_index") or 0)
+    is_carousel = content_type == "social_carousel"
+    anchor_image_bytes: bytes | None = None
+    if is_carousel and slide_index > 0:
+        # Look up slide 0's storage path (if it's already been generated)
+        with tenant_connection(t_uuid) as conn:
+            anchor_row = conn.execute(
+                "SELECT storage_path FROM creatives WHERE campaign_id = %s AND slide_index = 0 "
+                "AND storage_path IS NOT NULL LIMIT 1",
+                (campaign_id,),
+            ).fetchone()
+        if anchor_row and anchor_row[0]:
+            try:
+                anchor_image_bytes = download_bytes(anchor_row[0])
+            except Exception:
+                anchor_image_bytes = None
+        # If slide 0 isn't ready yet, requeue self with a delay so we anchor on the real one.
+        if anchor_image_bytes is None:
+            import logging
+            logging.getLogger("creative").info(
+                "carousel slide %s waiting on slide 0; requeueing in 10s", slide_index
+            )
+            generate_creative.apply_async(
+                args=[tenant_id, campaign_id, brief_index], countdown=10,
+            )
+            return f"deferred:slide_{slide_index}"
 
     # Load product image if present
     product_image_bytes: bytes | None = None
@@ -421,7 +467,12 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
         except Exception as e:
             import logging
             logging.getLogger("creative").warning("product image load failed: %s", e)
+    # Stash for use deeper in pipeline
     brief["_product_image_bytes"] = product_image_bytes
+    brief["_carousel_anchor_bytes"] = anchor_image_bytes
+    brief["_content_type"] = content_type
+    brief["_slide_index"] = slide_index
+    brief["_total_slides"] = slide_count
 
     # Resolve partner info BEFORE image gen so prompt can use it
     partner_logo_bytes: bytes | None = None
@@ -477,8 +528,8 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
             """
             insert into creatives (id, tenant_id, campaign_id, brand_id, channel, dimensions,
                                    copy_headline, copy_body, copy_cta, storage_path,
-                                   governance_status, human_status, persona_segment)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s)
+                                   governance_status, human_status, persona_segment, slide_index)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s, %s)
             """,
             (
                 str(creative_id), str(t_uuid), campaign_id,
@@ -486,6 +537,7 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
                 brief["channel"], brief["dimensions"],
                 copy.get("headline"), copy.get("body"), copy.get("cta"), path,
                 brief.get("persona_segment"),
+                slide_index,
             ),
         )
         conn.execute(

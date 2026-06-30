@@ -32,6 +32,10 @@ class CampaignIn(BaseModel):
     persona_segments: list[str] = Field(default_factory=list)  # multi
     copy_constraints: CopyConstraints = Field(default_factory=CopyConstraints)
     partner_brand: PartnerBrand | None = None
+    # v2.2 — social content types + research
+    content_type: str = Field("banner")  # banner | social_post | social_carousel
+    research_topic: str | None = None
+    carousel_slide_count: int = Field(1, ge=1, le=10)
 
 
 class CampaignOut(BaseModel):
@@ -45,6 +49,10 @@ class CampaignOut(BaseModel):
     brief: list[dict] | None
     copy_constraints: CopyConstraints
     partner_brand: PartnerBrand | None = None
+    content_type: str = "banner"
+    research_topic: str | None = None
+    research_notes: str | None = None
+    carousel_slide_count: int = 1
 
 
 @router.post("", response_model=CampaignOut)
@@ -60,15 +68,19 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
                 (str(user.tenant_id),),
             ).fetchone()
             brand_id = row[0] if row else None
+        # Carousel implies social_carousel and ≥3 slides
+        slide_count = payload.carousel_slide_count if payload.content_type == "social_carousel" else 1
         conn.execute(
             "insert into campaigns (id, tenant_id, brand_id, goal, persona_segment, status, "
-            "copy_constraints, partner_brand, product_image_path) "
-            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s::jsonb, %s)",
+            "copy_constraints, partner_brand, product_image_path, "
+            "content_type, research_topic, carousel_slide_count) "
+            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s::jsonb, %s, %s, %s, %s)",
             (
                 str(campaign_id), str(user.tenant_id), str(brand_id) if brand_id else None,
                 payload.goal, payload.persona_segment,
                 json.dumps(payload.copy_constraints.model_dump()),
                 partner_json, payload.product_image_path,
+                payload.content_type, payload.research_topic, slide_count,
             ),
         )
         # Auto-save / refresh the partner record so it's reusable next time
@@ -92,6 +104,22 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
             (str(user.tenant_id), str(user.user_id), "campaign.create", "campaign", str(campaign_id)),
         )
 
+    # Optional research step (synchronous before briefing — needs the notes available).
+    research_notes_text: str | None = None
+    if payload.research_topic:
+        from workers.research import gather_research
+        try:
+            result = gather_research(str(user.tenant_id), str(campaign_id))
+            if result.get("ok"):
+                with tenant_connection(user.tenant_id) as conn:
+                    rn = conn.execute(
+                        "SELECT research_notes FROM campaigns WHERE id = %s",
+                        (str(campaign_id),),
+                    ).fetchone()
+                    research_notes_text = rn[0] if rn else None
+        except Exception:
+            research_notes_text = None
+
     from agents.briefing_agent import run_briefing
     # Resolve the list of personas — explicit list wins, else fall back to legacy single field
     personas = payload.persona_segments or ([payload.persona_segment] if payload.persona_segment else [None])
@@ -103,6 +131,9 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
             payload.copy_constraints.model_dump(),
             partner_brand=(payload.partner_brand.model_dump() if payload.partner_brand else None),
             brand_id=brand_id,
+            content_type=payload.content_type,
+            research_notes=research_notes_text,
+            carousel_slide_count=slide_count,
         )
         # Tag each brief with its persona so the worker can find it
         for b in per_persona_briefs:
@@ -129,6 +160,10 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
         persona_segments=payload.persona_segments,
         status="briefed", brief=all_briefs, copy_constraints=payload.copy_constraints,
         partner_brand=payload.partner_brand,
+        content_type=payload.content_type,
+        research_topic=payload.research_topic,
+        research_notes=research_notes_text,
+        carousel_slide_count=slide_count,
     )
 
 
@@ -137,7 +172,8 @@ def get_campaign(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
     with tenant_connection(user.tenant_id) as conn:
         row = conn.execute(
             "SELECT id, goal, persona_segment, status, brief, copy_constraints, partner_brand, "
-            "brand_id, product_image_path FROM campaigns WHERE id = %s",
+            "brand_id, product_image_path, content_type, research_topic, research_notes, "
+            "carousel_slide_count FROM campaigns WHERE id = %s",
             (str(campaign_id),),
         ).fetchone()
     if not row:
@@ -147,5 +183,8 @@ def get_campaign(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
         copy_constraints=CopyConstraints(**row[5]) if row[5] else CopyConstraints(),
         partner_brand=PartnerBrand(**row[6]) if row[6] else None,
         brand_id=row[7], product_image_path=row[8],
+        content_type=row[9] or "banner",
+        research_topic=row[10], research_notes=row[11],
+        carousel_slide_count=row[12] or 1,
         persona_segments=list({b.get("persona_segment") for b in (row[4] or []) if b.get("persona_segment")}),
     )
