@@ -21,6 +21,11 @@ export default function NewCampaign() {
   const [goal, setGoal] = useState("");
   const [personas, setPersonas] = useState<string[]>([]);
 
+  // v2.2 — content type + research + carousel
+  const [contentType, setContentType] = useState<"banner" | "social_post" | "social_carousel">("banner");
+  const [researchTopic, setResearchTopic] = useState("");
+  const [carouselSlides, setCarouselSlides] = useState(5);
+
   const [productFile, setProductFile] = useState<File | null>(null);
 
   const [headlineMax, setHeadlineMax] = useState(30);
@@ -112,6 +117,9 @@ export default function NewCampaign() {
           },
           partner_brand,
           product_image_path,
+          content_type: contentType,
+          research_topic: researchTopic.trim() || null,
+          carousel_slide_count: contentType === "social_carousel" ? carouselSlides : 1,
         }),
       });
       router.push(`/campaigns/${c.id}`);
@@ -143,6 +151,30 @@ export default function NewCampaign() {
   return (
     <main className="mx-auto max-w-xl px-6 py-12">
       <h1 className="text-3xl font-semibold">New campaign</h1>
+
+      {/* Content type tabs */}
+      <div className="mt-5 grid grid-cols-3 gap-2 rounded-md border bg-neutral-50 p-1">
+        {([
+          { key: "banner", label: "Banner", desc: "Partnership offer" },
+          { key: "social_post", label: "Social post", desc: "Single image, native feed" },
+          { key: "social_carousel", label: "Carousel", desc: "Connected story, 3-10 slides" },
+        ] as const).map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setContentType(t.key)}
+            className={`rounded-md px-3 py-2 text-left transition ${
+              contentType === t.key
+                ? "bg-white shadow-sm ring-1 ring-neutral-900"
+                : "hover:bg-white/60"
+            }`}
+          >
+            <div className="text-sm font-semibold">{t.label}</div>
+            <div className="text-xs text-neutral-600">{t.desc}</div>
+          </button>
+        ))}
+      </div>
+
       <form onSubmit={submit} className="mt-6 space-y-4">
 
         <label className="block">
@@ -153,10 +185,56 @@ export default function NewCampaign() {
           </select>
         </label>
 
+        {/* Research topic — only for social content */}
+        {(contentType === "social_post" || contentType === "social_carousel") && (
+          <label className="block">
+            <span className="text-sm font-medium">Content topic (researched + grounded)</span>
+            <textarea
+              value={researchTopic}
+              onChange={(e) => setResearchTopic(e.target.value)}
+              rows={2}
+              placeholder="e.g. Best UPI rewards programmes in India 2026 — what makes OneCard different"
+              className="mt-1 w-full rounded-md border px-3 py-2"
+            />
+            <p className="mt-1 text-xs text-neutral-500">
+              Gemini will research this topic with Google grounding (~5s) and use the findings to ground the brief in real facts.
+              Optional — leave blank to skip research.
+            </p>
+          </label>
+        )}
+
+        {/* Carousel slide count */}
+        {contentType === "social_carousel" && (
+          <label className="block">
+            <div className="flex justify-between text-sm">
+              <span className="font-medium">Number of slides</span>
+              <span className="text-neutral-500">{carouselSlides}</span>
+            </div>
+            <input
+              type="range" min={3} max={10} value={carouselSlides}
+              onChange={(e) => setCarouselSlides(Number(e.target.value))}
+              className="w-full"
+            />
+            <p className="mt-1 text-xs text-neutral-500">
+              Slide 1 generates first and anchors the visual style; slides 2-N reference it for coherence.
+            </p>
+          </label>
+        )}
+
         <label className="block">
-          <span className="text-sm font-medium">Campaign goal</span>
+          <span className="text-sm font-medium">{
+            contentType === "banner" ? "Campaign goal"
+              : contentType === "social_post" ? "Post angle / message"
+              : "Carousel narrative goal"
+          }</span>
           <textarea required value={goal} onChange={(e) => setGoal(e.target.value)} rows={4}
-            placeholder="e.g. Launch summer menu — drive footfall to flagship stores"
+            placeholder={
+              contentType === "banner"
+                ? "e.g. Launch summer menu — drive footfall to flagship stores"
+                : contentType === "social_post"
+                ? "e.g. Show how easy it is to convert big purchases to EMIs"
+                : "e.g. Educate users on best UPI rewards on OneCard — hook, 3 points, then CTA"
+            }
             className="mt-1 w-full rounded-md border px-3 py-2" />
         </label>
 
@@ -268,7 +346,14 @@ export default function NewCampaign() {
 
         <button disabled={submitting || personas.length === 0}
           className="rounded-md bg-neutral-900 px-4 py-2 text-white disabled:opacity-50">
-          {submitting ? "Briefing…" : `Generate brief (${personas.length} persona${personas.length === 1 ? "" : "s"})`}
+          {submitting
+            ? (researchTopic.trim() && contentType !== "banner" ? "Researching + briefing…" : "Briefing…")
+            : contentType === "social_carousel"
+            ? `Generate ${carouselSlides}-slide carousel (${personas.length} persona${personas.length === 1 ? "" : "s"})`
+            : contentType === "social_post"
+            ? `Generate post (${personas.length} persona${personas.length === 1 ? "" : "s"})`
+            : `Generate brief (${personas.length} persona${personas.length === 1 ? "" : "s"})`
+          }
         </button>
         {err && <p className="text-sm text-red-600">{err}</p>}
       </form>

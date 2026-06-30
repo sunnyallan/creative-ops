@@ -17,7 +17,36 @@ type Creative = {
   human_status: string;
   persona_segment: string | null;
   brand_id?: string | null;
+  slide_index?: number;
 };
+
+// Group creatives into "review items". Carousel slides for the same
+// campaign+persona become one item rendered as a strip.
+function groupCreatives(items: Creative[]): Array<
+  | { kind: "single"; creative: Creative }
+  | { kind: "carousel"; key: string; slides: Creative[] }
+> {
+  const carouselMap = new Map<string, Creative[]>();
+  const singles: Creative[] = [];
+  for (const c of items) {
+    if (c.channel?.startsWith("instagram_carousel_slide")) {
+      const key = `${c.campaign_id}::${c.persona_segment || ""}`;
+      if (!carouselMap.has(key)) carouselMap.set(key, []);
+      carouselMap.get(key)!.push(c);
+    } else {
+      singles.push(c);
+    }
+  }
+  const carousels = Array.from(carouselMap.entries()).map(([key, slides]) => ({
+    kind: "carousel" as const,
+    key,
+    slides: slides.sort((a, b) => (a.slide_index ?? 0) - (b.slide_index ?? 0)),
+  }));
+  return [
+    ...carousels,
+    ...singles.map((c) => ({ kind: "single" as const, creative: c })),
+  ];
+}
 
 const REJECT_TAGS = ["wrong-tone", "off-brand-colour", "wrong-imagery", "copy-error", "other"];
 
@@ -64,8 +93,55 @@ export default function ReviewPage() {
       {isLoading && <p className="mt-6">Loading…</p>}
       {error && <p className="mt-6 text-red-600">{(error as Error).message}</p>}
 
+      {/* Carousel items first — they span the full width as horizontal strips */}
+      <div className="mt-6 space-y-6">
+        {(groupCreatives(data || []).filter((i) => i.kind === "carousel") as Array<{ kind: "carousel"; key: string; slides: Creative[] }>).map((item) => (
+          <article key={item.key} className="rounded-lg border bg-white p-4">
+            <div className="mb-3 flex items-center gap-2 text-xs">
+              <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-white">carousel</span>
+              <span className="text-neutral-500">{item.slides.length} slides</span>
+              {item.slides[0]?.persona_segment && (
+                <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-indigo-800">
+                  👤 {item.slides[0].persona_segment}
+                </span>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <div className="flex gap-3 pb-2">
+                {item.slides.map((s, idx) => (
+                  <div key={s.id} className="relative w-56 shrink-0 rounded-md border bg-white overflow-hidden">
+                    <div className="absolute left-2 top-2 z-10 rounded-full bg-neutral-900/80 px-2 py-0.5 text-xs text-white">
+                      {idx + 1} / {item.slides.length}
+                    </div>
+                    {s.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={s.image_url} alt="" className="w-full aspect-square object-cover" />
+                    ) : (
+                      <div className="aspect-square bg-neutral-100" />
+                    )}
+                    <div className="p-2 text-xs">
+                      <p className="font-medium line-clamp-2">{s.headline}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button onClick={async () => {
+                for (const s of item.slides) await approve(s.id);
+              }} className="flex-1 rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white">
+                Approve all slides
+              </button>
+              <button onClick={() => setRejecting(item.slides[0])} className="flex-1 rounded-md border px-3 py-1.5 text-sm">
+                Reject set
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+
       <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {(data || []).map((c) => (
+        {(data || []).filter((c) => !c.channel?.startsWith("instagram_carousel_slide")).map((c) => (
           <article key={c.id} className="rounded-lg border bg-white shadow-sm overflow-hidden">
             {c.image_url ? (
               <div className="aspect-square bg-neutral-100 flex items-center justify-center overflow-hidden">
