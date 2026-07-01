@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { supabaseBrowser } from "@/lib/supabase";
 import { useBrand, Brand } from "@/lib/brand-context";
 
 export default function BrandEdit() {
@@ -14,10 +15,50 @@ export default function BrandEdit() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoSignedUrl, setLogoSignedUrl] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   useEffect(() => {
-    apiFetch<Brand>(`/brands/${id}`).then(setB).catch((e) => setErr(e.message));
+    apiFetch<Brand>(`/brands/${id}`).then(async (brand) => {
+      setB(brand);
+      if (brand.logo_path) {
+        try {
+          const sb = supabaseBrowser();
+          const { data } = await sb.storage.from("tenant-assets").createSignedUrl(brand.logo_path, 3600);
+          if (data?.signedUrl) setLogoSignedUrl(data.signedUrl);
+        } catch {}
+      }
+    }).catch((e) => setErr(e.message));
   }, [id]);
+
+  async function replaceLogo() {
+    if (!logoFile || !b) return;
+    setUploadingLogo(true); setErr(null);
+    try {
+      const sb = supabaseBrowser();
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) throw new Error("not signed in");
+      const path = `tenants/${user.id}/brand/logos/${Date.now()}-${logoFile.name}`;
+      const { error: upErr } = await sb.storage.from("tenant-assets").upload(path, logoFile, { upsert: true });
+      if (upErr) throw upErr;
+      // Save the new path on the brand
+      await apiFetch(`/brands/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ ...b, logo_path: path, asset_permission_accepted: true }),
+      });
+      // Update local state + get a fresh signed URL for preview
+      const { data } = await sb.storage.from("tenant-assets").createSignedUrl(path, 3600);
+      setB({ ...b, logo_path: path });
+      setLogoSignedUrl(data?.signedUrl || null);
+      setLogoFile(null);
+      await refresh();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
 
   async function save() {
     if (!b) return;
@@ -59,6 +100,39 @@ export default function BrandEdit() {
         <Input label="Name" v={b.name} on={(v) => setB({ ...b, name: v })} />
         <Input label="Tone" v={b.tone || ""} on={(v) => setB({ ...b, tone: v })} />
         <TextArea label="Brand values" v={b.brand_values || ""} on={(v) => setB({ ...b, brand_values: v })} />
+      </section>
+
+      <section className="mt-6 space-y-3">
+        <h2 className="font-semibold">Logo</h2>
+        <div className="flex items-start gap-4">
+          <div className="w-32 h-32 rounded-lg border bg-white grid place-items-center overflow-hidden">
+            {logoSignedUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoSignedUrl} alt="Brand logo" className="max-w-full max-h-full object-contain p-2" />
+            ) : (
+              <span className="text-xs text-neutral-400">No logo</span>
+            )}
+          </div>
+          <div className="flex-1 space-y-2">
+            <label className="block text-sm">
+              Replace logo (PNG/SVG, transparent background works best)
+              <input type="file" accept=".png,.svg" onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+                className="mt-1 block" />
+            </label>
+            {logoFile && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-neutral-500">{logoFile.name}</span>
+                <button onClick={replaceLogo} disabled={uploadingLogo}
+                  className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">
+                  {uploadingLogo ? "Uploading…" : "Replace logo"}
+                </button>
+              </div>
+            )}
+            <p className="text-xs text-neutral-500">
+              This logo is stamped in the corner of every generated creative for this brand.
+            </p>
+          </div>
+        </div>
       </section>
 
       <section className="mt-6 space-y-3">
