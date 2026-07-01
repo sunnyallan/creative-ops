@@ -40,6 +40,16 @@ def _luminance(rgb: tuple[int, int, int]) -> float:
     return 0.299 * r + 0.587 * g + 0.114 * b
 
 
+def _rgb_variance(img: Image.Image, box: tuple[int, int, int, int]) -> float:
+    """Rough colour-variance score of a canvas region.
+    High score (>40) means the region has busy content — text laid over it
+    without a safe-zone overlay will be hard to read."""
+    from PIL import ImageStat
+    region = img.crop(box).convert("RGB").resize((48, 48))
+    stat = ImageStat.Stat(region)
+    return sum(stat.stddev[:3]) / 3.0
+
+
 def _avg_rgb(img: Image.Image, box: tuple[int, int, int, int]) -> tuple[int, int, int]:
     region = img.crop(box).resize((32, 32))  # downsample for speed
     r_sum = g_sum = b_sum = 0
@@ -378,13 +388,36 @@ def composite(
     by1 = H - bottom_margin + content_pad
 
     # Sample background where the text will sit to pick contrast colour.
+    # Also compute variance — high variance means busy content that will
+    # eat the text without a safe-zone overlay.
+    auto_variance = 0.0
     if bar in ("auto", "none"):
         sampled_bg = _avg_rgb(canvas, (text_region_x0, by0, text_region_x1, by1))
+        auto_variance = _rgb_variance(canvas, (text_region_x0, by0, text_region_x1, by1))
         text_hex, shadow = _pick_text_colour(sampled_bg)
+
+    # GUARDRAIL — variance-triggered safe zone.
+    # If the text region is busy (variance > 40), promote 'auto' to an
+    # implicit gradient using the sampled_bg colour so text has a clean
+    # canvas without looking like a hard overlay box.
+    VARIANCE_THRESHOLD = 40.0
+    is_variance_guarded = bar in ("auto", "none") and auto_variance > VARIANCE_THRESHOLD
 
     # title_bar overlays draw ACROSS THE FULL CANVAS WIDTH (not just the text region)
     # so they never crop awkwardly at the image/text boundary on wide layouts.
-    if bar == "gradient":
+    if is_variance_guarded:
+        overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+        odraw = ImageDraw.Draw(overlay)
+        grad_top = by0
+        grad_h = max(1, H - grad_top)
+        r, g, b = sampled_bg
+        for i in range(grad_h):
+            alpha = int(210 * (i / grad_h))  # transparent at top → opaque at bottom
+            odraw.rectangle([0, grad_top + i, W, grad_top + i + 1], fill=(r, g, b, alpha))
+        # Re-pick text colour against the solid fill (sampled_bg) since the safe
+        # zone will now dominate the region.
+        text_hex, shadow = _pick_text_colour(sampled_bg)
+    elif bar == "gradient":
         overlay = Image.new("RGBA", size, (0, 0, 0, 0))
         odraw = ImageDraw.Draw(overlay)
         # Fade from transparent at top of text region to opaque at canvas bottom.
