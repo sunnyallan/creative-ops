@@ -258,21 +258,71 @@ def generate_brief(state: BriefingState) -> BriefingState:
         "Return ONLY the JSON array."
     )
 
-    resp = traced_generate(
-        model=MODEL_PRO,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.7,
-        ),
-        trace_name="briefing.generate_brief",
-        tenant_id=state["tenant_id"],
-        campaign_id=state["campaign_id"],
-        metadata={"persona": state.get("persona_segment"), "goal": goal[:200]},
-    )
-    briefs = json.loads(resp.text)
-    if not isinstance(briefs, list):
-        raise ValueError("brief must be a JSON array")
+    expected_count = len(channels)
+
+    def _call_once() -> list[dict[str, Any]]:
+        resp = traced_generate(
+            model=MODEL_PRO,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.7,
+            ),
+            trace_name="briefing.generate_brief",
+            tenant_id=state["tenant_id"],
+            campaign_id=state["campaign_id"],
+            metadata={"persona": state.get("persona_segment"), "goal": goal[:200]},
+        )
+        parsed = json.loads(resp.text)
+        if not isinstance(parsed, list):
+            raise ValueError("brief must be a JSON array")
+        return parsed
+
+    briefs = _call_once()
+    # If the model under-produced (e.g. asked for 5 slides but returned 4),
+    # retry once with a stronger count reminder — this is a known Gemini quirk.
+    if len(briefs) < expected_count:
+        import logging
+        logging.getLogger("briefing").warning(
+            "brief count mismatch: expected %s, got %s — retrying with reinforcement",
+            expected_count, len(briefs),
+        )
+        prompt_retry = prompt + (
+            f"\n\n**CRITICAL** — the previous attempt returned {len(briefs)} items but "
+            f"we need EXACTLY {expected_count}. Produce a JSON array with EXACTLY "
+            f"{expected_count} items, one per channel in the CHANNELS list, in the same order."
+        )
+        try:
+            resp2 = traced_generate(
+                model=MODEL_PRO,
+                contents=prompt_retry,
+                config=genai_types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.5,
+                ),
+                trace_name="briefing.generate_brief_retry",
+                tenant_id=state["tenant_id"],
+                campaign_id=state["campaign_id"],
+                metadata={"expected_count": expected_count, "first_count": len(briefs)},
+            )
+            retried = json.loads(resp2.text)
+            if isinstance(retried, list) and len(retried) >= expected_count:
+                briefs = retried
+        except Exception:
+            pass
+
+    # Last-resort padding: if we still have fewer briefs than channels, clone the
+    # last brief to fill up the slots so downstream slide indexing doesn't skip.
+    if len(briefs) < expected_count and briefs:
+        last = briefs[-1]
+        while len(briefs) < expected_count:
+            padded = {**last, "_padded": True}
+            # Update slide-specific fields if applicable
+            if content_type == "social_carousel":
+                padded["channel"] = channels[len(briefs)]["channel"]
+                padded["slide_index"] = channels[len(briefs)]["slide_index"]
+            briefs.append(padded)
+
     return {**state, "output_brief": briefs}
 
 
