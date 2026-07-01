@@ -545,7 +545,8 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
         conn.execute(
             "insert into audit_log (tenant_id, action, entity, entity_id, meta) "
             "values (%s, %s, %s, %s, %s::jsonb)",
-            (str(t_uuid), "creative.generated", "creative", str(creative_id), json.dumps(brief)),
+            (str(t_uuid), "creative.generated", "creative", str(creative_id),
+             json.dumps({k: v for k, v in brief.items() if not k.startswith("_")}, default=str)),
         )
 
     # Kick governance
