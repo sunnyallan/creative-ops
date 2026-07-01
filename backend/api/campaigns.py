@@ -167,6 +167,38 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
     )
 
 
+@router.post("/{campaign_id}/regenerate-missing")
+def regenerate_missing_creatives(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
+    """Re-fire creative.generate tasks for any brief entries that have no
+    corresponding creative row yet. Useful when a worker died mid-run
+    (e.g. carousel slides stuck on 'generating…')."""
+    with tenant_connection(user.tenant_id) as conn:
+        row = conn.execute(
+            "SELECT brief FROM campaigns WHERE id = %s AND tenant_id = %s",
+            (str(campaign_id), str(user.tenant_id)),
+        ).fetchone()
+        if not row or not row[0]:
+            raise HTTPException(404, "campaign or brief missing")
+        briefs: list[dict] = row[0]
+
+        # Which brief_index values already have a creative with storage_path?
+        existing = conn.execute(
+            "SELECT DISTINCT channel FROM creatives "
+            "WHERE campaign_id = %s AND storage_path IS NOT NULL",
+            (str(campaign_id),),
+        ).fetchall()
+        existing_channels = {r[0] for r in existing}
+
+    from workers.creative import generate_creative
+    fired = 0
+    for i, b in enumerate(briefs):
+        if b.get("channel") in existing_channels:
+            continue
+        generate_creative.delay(str(user.tenant_id), str(campaign_id), i)
+        fired += 1
+    return {"ok": True, "fired": fired, "total_briefs": len(briefs)}
+
+
 @router.get("/{campaign_id}", response_model=CampaignOut)
 def get_campaign(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
     with tenant_connection(user.tenant_id) as conn:
