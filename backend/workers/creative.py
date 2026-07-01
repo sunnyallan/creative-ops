@@ -106,6 +106,8 @@ def _load_brand(tenant_id: UUID, brand_id: UUID | None) -> dict[str, Any]:
 def _gen_copy(brand_kit: dict[str, Any], brief: dict[str, Any], tenant_id: str, campaign_id: str,
               constraints: dict[str, int] | None = None) -> dict[str, str]:
     c = constraints or {"headline_max_chars": 30, "body_max_chars": 50, "cta_max_chars": 15}
+    # Strip internal-only keys (bytes payloads etc.) before serialising into the prompt.
+    public_brief = {k: v for k, v in brief.items() if not k.startswith("_")}
     prompt = (
         _brand_prefix(brand_kit)
         + "TASK: Write ad copy for the brief. Return JSON: "
@@ -113,7 +115,7 @@ def _gen_copy(brand_kit: dict[str, Any], brief: dict[str, Any], tenant_id: str, 
         f"HARD LIMITS: headline ≤ {c['headline_max_chars']} chars, "
         f"body ≤ {c['body_max_chars']} chars, cta ≤ {c['cta_max_chars']} chars. "
         "Truncate ideas, never exceed limits.\n\n"
-        f"BRIEF:\n{json.dumps(brief, indent=2)}"
+        f"BRIEF:\n{json.dumps(public_brief, indent=2, default=str)}"
     )
     resp = traced_generate(
         model=MODEL_PRO,
