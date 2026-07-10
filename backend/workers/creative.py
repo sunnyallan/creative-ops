@@ -324,6 +324,11 @@ def _gen_image(brand_kit: dict[str, Any], brief: dict[str, Any]) -> bytes:
            f"{anti_photo_override}"
            f"=== END BRAND STYLE ===\n\n" if has_rich_brand_style else brand_block)
         + f"{product_block}"
+        + (f"LAYOUT DIRECTION (medium + composition for this layout style):\n"
+           f"{brief.get('_layout_fragment')}\n\n" if brief.get("_layout_fragment") else "")
+        + (f"CUTOUT MODE: render the subject alone on a PURE WHITE #FFFFFF background — "
+           f"no scene, no props, no cast shadows bleeding to the edges, sharp clean silhouette. "
+           f"The background will be removed in post-production.\n\n" if brief.get("_cutout_mode") else "")
         + f"PERSONA & SCENE: {direction}\n"
         + f"Adapt the brand style to this persona's mood, but never abandon the brand style itself.\n\n"
         + f"SUBJECT: {subject_focus}.\n"
@@ -408,6 +413,20 @@ def _gen_image_fallback(prompt: str) -> bytes:
     import httpx
     url = result["images"][0]["url"]
     return httpx.get(url, timeout=60).content
+
+
+# ----- v3.0: rembg background removal (lazy session, reused across tasks) -----
+_REMBG_SESSION = None
+
+
+def _cutout_subject(image_bytes: bytes) -> bytes:
+    """Strip the background from a white-bg subject shot → transparent RGBA PNG.
+    Uses rembg u2net (model pre-baked into the Docker image)."""
+    global _REMBG_SESSION
+    from rembg import new_session, remove
+    if _REMBG_SESSION is None:
+        _REMBG_SESSION = new_session("u2net")
+    return remove(image_bytes, session=_REMBG_SESSION)
 
 
 @celery_app.task(name="creative.generate")
@@ -500,9 +519,49 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
         }
 
     copy = _gen_copy(brand_kit, brief, tenant_id, campaign_id, copy_constraints)
-    image_bytes = _gen_image(brand_kit, brief)
 
-    brand_colour = (brand_kit.get("colours") or ["#111111"])[0]
+    # ----- v3.0 asset planner: layout decides what we generate -----
+    from layouts import get_layout, asset_plan_of
+    layout_key = brief.get("layout_style") or "full_bleed_photo"
+    layout = get_layout(layout_key)
+    plan, asset_count = asset_plan_of(layout_key)
+    if layout.get("image_prompt_fragment"):
+        brief["_layout_fragment"] = layout["image_prompt_fragment"]
+
+    image_bytes: bytes | None = None
+    cutout_bytes: bytes | None = None
+    extra_assets: list[bytes] = []
+
+    if plan == "none":
+        pass  # typography-led layout — no image generation at all
+    elif plan == "subject_cutout":
+        brief["_cutout_mode"] = True
+        raw = _gen_image(brand_kit, brief)
+        try:
+            cutout_bytes = _cutout_subject(raw)
+        except Exception as e:
+            import logging
+            logging.getLogger("creative").warning("cutout failed, using raw image: %s", e)
+            image_bytes = raw  # renderer falls back to overlay with the raw shot
+    elif plan == "multi":
+        # First asset anchors the rest for palette consistency (carousel pattern).
+        first = _gen_image(brand_kit, brief)
+        extra_assets.append(first)
+        for i in range(1, asset_count):
+            var_brief = {
+                **brief,
+                "image_direction": f"{brief.get('image_direction', '')} — variation {i + 1} of {asset_count}, "
+                                   f"same style and palette, different angle or state.",
+                "_carousel_anchor_bytes": first,
+            }
+            try:
+                extra_assets.append(_gen_image(brand_kit, var_brief))
+            except Exception:
+                extra_assets.append(first)  # degrade gracefully: reuse the anchor
+    else:  # "full"
+        image_bytes = _gen_image(brand_kit, brief)
+
+    brand_colours = brand_kit.get("colours") or ["#111111"]
     logo_bytes: bytes | None = None
     logo_paths = brand_kit.get("logo_paths") or []
     if logo_paths:
@@ -511,17 +570,22 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
         except Exception:
             logo_bytes = None
 
-    composed = composite(
+    from workers.compositor import render_layout
+    composed = render_layout(
+        layout_mode=layout.get("compositor_mode", "overlay"),
+        mode_params=layout.get("mode_params") or {},
         channel=brief["channel"],
         dimensions=brief.get("dimensions", "1080x1080"),
         base_image=image_bytes,
+        cutout=cutout_bytes,
+        extra_assets=extra_assets,
         headline=copy.get("headline", ""),
         body=copy.get("body", ""),
         cta=copy.get("cta", ""),
-        brand_colour=brand_colour,
+        brand_colours=brand_colours,
         logo_bytes=logo_bytes,
-        template_config=brand_kit.get("template_config"),
         partner_logo_bytes=partner_logo_bytes,
+        template_config=brand_kit.get("template_config"),
         partner_name=partner_name,
     )
 
@@ -534,8 +598,9 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
             """
             insert into creatives (id, tenant_id, campaign_id, brand_id, channel, dimensions,
                                    copy_headline, copy_body, copy_cta, storage_path,
-                                   governance_status, human_status, persona_segment, slide_index)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s, %s)
+                                   governance_status, human_status, persona_segment, slide_index,
+                                   layout_style)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s, %s, %s)
             """,
             (
                 str(creative_id), str(t_uuid), campaign_id,
@@ -544,6 +609,7 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
                 copy.get("headline"), copy.get("body"), copy.get("cta"), path,
                 brief.get("persona_segment"),
                 slide_index,
+                layout_key,
             ),
         )
         conn.execute(

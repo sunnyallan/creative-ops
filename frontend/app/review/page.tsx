@@ -18,6 +18,7 @@ type Creative = {
   persona_segment: string | null;
   brand_id?: string | null;
   slide_index?: number;
+  layout_style?: string | null;
 };
 
 // Group creatives into "review items". Carousel slides for the same
@@ -158,6 +159,11 @@ export default function ReviewPage() {
                 {c.persona_segment && (
                   <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-indigo-800">
                     👤 {c.persona_segment}
+                  </span>
+                )}
+                {c.layout_style && (
+                  <span className="rounded-full bg-sky-100 px-2 py-0.5 text-sky-800">
+                    ▦ {c.layout_style.replace(/_/g, " ")}
                   </span>
                 )}
                 {c.governance_status === "flagged" && (

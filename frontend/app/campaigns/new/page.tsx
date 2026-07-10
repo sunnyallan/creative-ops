@@ -14,6 +14,13 @@ type SavedPartner = {
   products_or_services: string | null;
 };
 
+type LayoutOption = {
+  key: string;
+  name: string;
+  description: string;
+  asset_plan: string;
+};
+
 export default function NewCampaign() {
   const router = useRouter();
   const { brands, activeBrandId, setActiveBrandId, activeBrand, loading: brandsLoading } = useBrand();
@@ -25,6 +32,11 @@ export default function NewCampaign() {
   const [contentType, setContentType] = useState<"banner" | "social_post" | "social_carousel">("banner");
   const [researchTopic, setResearchTopic] = useState("");
   const [carouselSlides, setCarouselSlides] = useState(5);
+
+  // v3.0 — layout style
+  const [layouts, setLayouts] = useState<LayoutOption[]>([]);
+  const [layoutStyle, setLayoutStyle] = useState<string>("auto");
+  const [showAllLayouts, setShowAllLayouts] = useState(false);
 
   const [productFile, setProductFile] = useState<File | null>(null);
 
@@ -50,6 +62,7 @@ export default function NewCampaign() {
       setSavedPartners(ps);
       if (ps.length > 0) setPartnerMode("existing");
     }).catch(() => {});
+    apiFetch<LayoutOption[]>("/layouts").then(setLayouts).catch(() => {});
   }, []);
 
   // Reset personas when the active brand changes
@@ -120,6 +133,7 @@ export default function NewCampaign() {
           content_type: contentType,
           research_topic: researchTopic.trim() || null,
           carousel_slide_count: contentType === "social_carousel" ? carouselSlides : 1,
+          layout_style: layoutStyle,
         }),
       });
       router.push(`/campaigns/${c.id}`);
@@ -237,6 +251,46 @@ export default function NewCampaign() {
             }
             className="mt-1 w-full rounded-md border px-3 py-2" />
         </label>
+
+        <fieldset className="rounded-md border p-3">
+          <legend className="px-1 text-sm font-medium">Layout style</legend>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => setLayoutStyle("auto")}
+              className={`rounded-md border px-3 py-2 text-left ${
+                layoutStyle === "auto" ? "ring-1 ring-neutral-900 bg-white shadow-sm" : "bg-neutral-50 hover:bg-white"
+              }`}
+            >
+              <div className="text-sm font-semibold">✨ Auto</div>
+              <div className="text-xs text-neutral-600">AI picks the best layout for this goal</div>
+            </button>
+            {(showAllLayouts ? layouts : layouts.slice(0, 5)).map((l) => (
+              <button
+                key={l.key}
+                type="button"
+                onClick={() => setLayoutStyle(l.key)}
+                className={`rounded-md border px-3 py-2 text-left ${
+                  layoutStyle === l.key ? "ring-1 ring-neutral-900 bg-white shadow-sm" : "bg-neutral-50 hover:bg-white"
+                }`}
+              >
+                <div className="flex items-center gap-1 text-sm font-semibold">
+                  {l.name}
+                  {l.asset_plan === "none" && (
+                    <span className="rounded-full bg-emerald-100 px-1.5 text-[10px] text-emerald-800">fast</span>
+                  )}
+                </div>
+                <div className="text-xs text-neutral-600 line-clamp-2">{l.description}</div>
+              </button>
+            ))}
+          </div>
+          {layouts.length > 5 && (
+            <button type="button" onClick={() => setShowAllLayouts(!showAllLayouts)}
+              className="mt-2 text-sm text-blue-600">
+              {showAllLayouts ? "Show fewer" : `Show all ${layouts.length} styles`}
+            </button>
+          )}
+        </fieldset>
 
         <fieldset className="rounded-md border p-3">
           <legend className="px-1 text-sm font-medium">Personas (pick one or more)</legend>

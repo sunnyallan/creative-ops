@@ -26,6 +26,7 @@ class CreativeOut(BaseModel):
     human_rejection_tag: str | None
     persona_segment: str | None = None
     slide_index: int = 0
+    layout_style: str | None = None
 
 
 class RejectIn(BaseModel):
@@ -47,6 +48,7 @@ def _row_to_creative(row: tuple) -> CreativeOut:
         human_status=row[11], human_rejection_reason=row[12], human_rejection_tag=row[13],
         persona_segment=row[14] if len(row) > 14 else None,
         slide_index=row[15] if len(row) > 15 else 0,
+        layout_style=row[16] if len(row) > 16 else None,
     )
 
 
@@ -59,7 +61,7 @@ def list_creatives(
     q = (
         "SELECT id, campaign_id, channel, dimensions, copy_headline, copy_body, copy_cta, "
         "tenant_id, storage_path, governance_status, governance_issues, "
-        "human_status, human_rejection_reason, human_rejection_tag, persona_segment, slide_index "
+        "human_status, human_rejection_reason, human_rejection_tag, persona_segment, slide_index, layout_style "
         "FROM creatives WHERE tenant_id = %s"
     )
     args: list = [str(user.tenant_id)]

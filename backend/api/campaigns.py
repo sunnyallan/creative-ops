@@ -9,6 +9,15 @@ from db.session import tenant_connection
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
+layouts_router = APIRouter(prefix="/layouts", tags=["layouts"])
+
+
+@layouts_router.get("")
+def list_layouts(user: CurrentUser = Depends(current_user)):
+    """The 20 built-in layout styles for the campaign form picker."""
+    from layouts import registry_for_api
+    return registry_for_api()
+
 
 class CopyConstraints(BaseModel):
     headline_max_chars: int = Field(30, ge=10, le=200)
@@ -36,6 +45,8 @@ class CampaignIn(BaseModel):
     content_type: str = Field("banner")  # banner | social_post | social_carousel
     research_topic: str | None = None
     carousel_slide_count: int = Field(1, ge=1, le=10)
+    # v3.0 — layout engine
+    layout_style: str = Field("auto")  # 'auto' or a key from layouts.LAYOUTS
 
 
 class CampaignOut(BaseModel):
@@ -53,6 +64,7 @@ class CampaignOut(BaseModel):
     research_topic: str | None = None
     research_notes: str | None = None
     carousel_slide_count: int = 1
+    layout_style: str = "auto"
 
 
 @router.post("", response_model=CampaignOut)
@@ -73,14 +85,15 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
         conn.execute(
             "insert into campaigns (id, tenant_id, brand_id, goal, persona_segment, status, "
             "copy_constraints, partner_brand, product_image_path, "
-            "content_type, research_topic, carousel_slide_count) "
-            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s::jsonb, %s, %s, %s, %s)",
+            "content_type, research_topic, carousel_slide_count, layout_style) "
+            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s)",
             (
                 str(campaign_id), str(user.tenant_id), str(brand_id) if brand_id else None,
                 payload.goal, payload.persona_segment,
                 json.dumps(payload.copy_constraints.model_dump()),
                 partner_json, payload.product_image_path,
                 payload.content_type, payload.research_topic, slide_count,
+                payload.layout_style,
             ),
         )
         # Auto-save / refresh the partner record so it's reusable next time
@@ -134,6 +147,7 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
             content_type=payload.content_type,
             research_notes=research_notes_text,
             carousel_slide_count=slide_count,
+            layout_style=payload.layout_style,
         )
         # Tag each brief with its persona so the worker can find it
         for b in per_persona_briefs:
@@ -205,7 +219,7 @@ def get_campaign(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
         row = conn.execute(
             "SELECT id, goal, persona_segment, status, brief, copy_constraints, partner_brand, "
             "brand_id, product_image_path, content_type, research_topic, research_notes, "
-            "carousel_slide_count FROM campaigns WHERE id = %s",
+            "carousel_slide_count, layout_style FROM campaigns WHERE id = %s",
             (str(campaign_id),),
         ).fetchone()
     if not row:
@@ -218,5 +232,6 @@ def get_campaign(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
         content_type=row[9] or "banner",
         research_topic=row[10], research_notes=row[11],
         carousel_slide_count=row[12] or 1,
+        layout_style=row[13] or "auto",
         persona_segments=list({b.get("persona_segment") for b in (row[4] or []) if b.get("persona_segment")}),
     )

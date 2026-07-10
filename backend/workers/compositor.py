@@ -557,3 +557,407 @@ def composite(
     # method=6 = slowest/best compression (still fast for our canvases).
     canvas.convert("RGB").save(out, format="WEBP", quality=82, method=6)
     return out.getvalue()
+
+
+# ============================================================================
+# v3.0 — Layout renderer dispatch
+# The original composite() above remains the "overlay" renderer, untouched.
+# render_layout() routes to it or to one of the new mode renderers below.
+# All modes reuse the module helpers (_font, _wrap, _pick_text_colour,
+# _prep_logo, _single_plate, _contrast_ratio) and finish as WebP q82.
+# ============================================================================
+
+import re as _re
+
+
+def _webp(canvas: Image.Image) -> bytes:
+    out = io.BytesIO()
+    canvas.convert("RGB").save(out, format="WEBP", quality=82, method=6)
+    return out.getvalue()
+
+
+def _resolve_bg(mode_params: dict, brand_colours: list[str]) -> tuple[int, int, int]:
+    """Map 'brand_primary'/'brand_secondary' → actual RGB from the brand palette."""
+    key = (mode_params or {}).get("bg", "brand_primary")
+    primary = _hex_rgb(_safe_hex(brand_colours[0] if brand_colours else "", "#111111"))
+    secondary = _hex_rgb(_safe_hex(
+        brand_colours[1] if len(brand_colours) > 1 else (brand_colours[0] if brand_colours else ""),
+        "#f2efe9",
+    ))
+    return secondary if key == "brand_secondary" else primary
+
+
+def _gradient_canvas(size: tuple[int, int], c1: tuple[int, int, int], c2: tuple[int, int, int]) -> Image.Image:
+    """Vertical two-stop gradient."""
+    W, H = size
+    canvas = Image.new("RGB", size)
+    px = canvas.load()
+    for y in range(H):
+        t = y / max(1, H - 1)
+        row = tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
+        for x in range(W):
+            px[x, y] = row
+    return canvas
+
+
+def _paste_logos(canvas: Image.Image, logo_bytes, partner_logo_bytes, cfg: dict, pad: int) -> Image.Image:
+    """Own logo at cfg position, partner on the opposite corner (reuses v1 helpers)."""
+    primary_pos = (cfg or {}).get("logo_position", "top_right")
+    if primary_pos == "none":
+        return canvas
+    W = canvas.width
+    try:
+        primary = _prep_logo(logo_bytes, W) if logo_bytes else None
+        partner = _prep_logo(partner_logo_bytes, W) if partner_logo_bytes else None
+        if primary:
+            plate = _single_plate(primary)
+            canvas.paste(plate, _logo_box(primary_pos, canvas.size, plate.size, pad), plate)
+        if partner:
+            p_plate = _single_plate(partner)
+            canvas.paste(p_plate, _logo_box(_opposite_logo_pos(primary_pos), canvas.size, p_plate.size, pad), p_plate)
+    except Exception:
+        pass
+    return canvas
+
+
+def _draw_text_stack(
+    canvas: Image.Image,
+    box: tuple[int, int, int, int],       # x0, y0, x1, y1 region for the stack
+    headline: str, body: str, cta: str,
+    brand_rgb: tuple[int, int, int],
+    *,
+    head_size: int = 62, body_size: int = 30, cta_size: int = 46,
+    align: str = "left",
+    text_rgb: tuple[int, int, int] | None = None,
+    anchor: str = "bottom",               # bottom | top | center
+) -> Image.Image:
+    """Shared headline+body+CTA renderer for the v3 modes. Auto-contrast against
+    the region it draws on unless text_rgb is forced."""
+    x0, y0, x1, y1 = box
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    max_w = x1 - x0
+
+    if text_rgb is None:
+        sampled = _avg_rgb(canvas, box)
+        text_hex, shadow = _pick_text_colour(sampled)
+    else:
+        text_hex = "#%02x%02x%02x" % text_rgb
+        lum_dark = _contrast_ratio(text_rgb, (17, 17, 17)) < _contrast_ratio(text_rgb, (255, 255, 255))
+        shadow = (0, 0, 0, 120) if not lum_dark else (255, 255, 255, 120)
+
+    head_font = _font(head_size, bold=True)
+    body_font = _font(body_size, bold=False)
+    cta_font = _font(cta_size, bold=True)
+
+    head_lines = _wrap(headline or "", head_font, max_w, draw)[:4]
+    # Shrink headline if it wraps more than 3 lines
+    while len(head_lines) > 3 and head_size > 36:
+        head_size = int(head_size * 0.85)
+        head_font = _font(head_size, bold=True)
+        head_lines = _wrap(headline or "", head_font, max_w, draw)[:4]
+    body_lines = _wrap(body or "", body_font, max_w, draw)[:3] if body else []
+
+    head_lh = head_size + 8
+    body_lh = body_size + 6
+    ascent, descent = cta_font.getmetrics()
+    cta_py = max(8, int(cta_size * 0.42))
+    cta_px = max(16, int(cta_size * 0.9))
+    cta_h = (ascent + descent + 2 * cta_py) if cta else 0
+    gap1 = 14 if body_lines else 0
+    gap2 = 24 if cta else 0
+    total_h = len(head_lines) * head_lh + gap1 + len(body_lines) * body_lh + gap2 + cta_h
+
+    if anchor == "bottom":
+        y = y1 - total_h
+    elif anchor == "center":
+        y = y0 + max(0, ((y1 - y0) - total_h) // 2)
+    else:
+        y = y0
+
+    def _line_x(w: int) -> int:
+        if align == "center":
+            return x0 + (max_w - w) // 2
+        return x0
+
+    for ln in head_lines:
+        bb = draw.textbbox((0, 0), ln, font=head_font)
+        _draw_text_with_shadow(draw, (_line_x(bb[2] - bb[0]), y), ln, head_font, fill=text_hex, shadow=shadow)
+        y += head_lh
+    y += gap1
+    for ln in body_lines:
+        bb = draw.textbbox((0, 0), ln, font=body_font)
+        _draw_text_with_shadow(draw, (_line_x(bb[2] - bb[0]), y), ln, body_font, fill=text_hex, shadow=shadow)
+        y += body_lh
+    y += gap2
+
+    if cta:
+        cta_text = cta.strip()[:40]
+        bb = draw.textbbox((0, 0), cta_text, font=cta_font)
+        ctw = bb[2] - bb[0]
+        pill_x0 = _line_x(ctw + 2 * cta_px)
+        pill_y0, pill_y1 = y, y + cta_h
+        radius = cta_h // 2
+        pill_sample = _avg_rgb(canvas, (pill_x0, pill_y0, min(pill_x0 + ctw + 2 * cta_px, x1), pill_y1))
+        if _contrast_ratio(brand_rgb, pill_sample) < 2.5:
+            pill_fill, cta_fill = (255, 255, 255, 255), "#111111"
+        else:
+            pill_fill = brand_rgb + (255,)
+            cta_fill = "white" if _contrast_ratio(brand_rgb, (255, 255, 255)) >= 3.0 else "#111111"
+        draw.rounded_rectangle([pill_x0, pill_y0, pill_x0 + ctw + 2 * cta_px, pill_y1], radius=radius, fill=pill_fill)
+        text_y = pill_y0 + (cta_h - bb[1] - bb[3]) // 2
+        draw.text((pill_x0 + cta_px - bb[0], text_y), cta_text, fill=cta_fill, font=cta_font)
+
+    return canvas
+
+
+def _duotone(image_bytes: bytes, dark: tuple[int, int, int], light: tuple[int, int, int]) -> bytes:
+    """Remap a photo's tones between two brand colours."""
+    img = Image.open(io.BytesIO(image_bytes)).convert("L")
+    lut = []
+    for ch in range(3):
+        lut.extend(int(dark[ch] + (light[ch] - dark[ch]) * (i / 255)) for i in range(256))
+    out = Image.merge("RGB", [img.point(lut[c * 256:(c + 1) * 256]) for c in range(3)])
+    buf = io.BytesIO()
+    out.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_layout(
+    *,
+    layout_mode: str,
+    mode_params: dict | None,
+    channel: str,
+    dimensions: str,
+    base_image: bytes | None,
+    cutout: bytes | None,
+    extra_assets: list[bytes] | None,
+    headline: str, body: str, cta: str,
+    brand_colours: list[str],
+    logo_bytes: bytes | None,
+    partner_logo_bytes: bytes | None,
+    template_config: dict | None,
+    partner_name: str | None = None,
+) -> bytes:
+    """v3.0 dispatcher. 'overlay' routes to the battle-tested composite();
+    every other mode renders here."""
+    mp = mode_params or {}
+    size = _parse_dims(dimensions)
+    W, H = size
+    pad = max(28, W // 32)
+    cfg = template_config or {}
+    brand_hex = _safe_hex((cfg or {}).get("cta_colour") or (brand_colours[0] if brand_colours else ""), "#111111")
+    brand_rgb = _hex_rgb(brand_hex)
+    primary_rgb = _hex_rgb(_safe_hex(brand_colours[0] if brand_colours else "", "#111111"))
+    secondary_rgb = _hex_rgb(_safe_hex(
+        brand_colours[1] if len(brand_colours) > 1 else "", "#f2efe9"))
+
+    # ---------- overlay (delegate to v2.2 composite) ----------
+    if layout_mode == "overlay":
+        img = base_image
+        if img and mp.get("post_filter") == "duotone":
+            img = _duotone(img, primary_rgb, secondary_rgb)
+        if img is None:
+            # Defensive: overlay without an image degrades to typo mode.
+            layout_mode = "typo"
+        else:
+            return composite(
+                channel=channel, dimensions=dimensions, base_image=img,
+                headline=headline, cta=cta, body=body,
+                brand_colour=brand_colours[0] if brand_colours else "#111111",
+                logo_bytes=logo_bytes, template_config=template_config,
+                partner_logo_bytes=partner_logo_bytes, partner_name=partner_name,
+            )
+
+    # ---------- text-led modes ----------
+    if layout_mode == "typo":
+        if mp.get("bg") == "gradient":
+            canvas = _gradient_canvas(size, primary_rgb, secondary_rgb)
+        else:
+            canvas = Image.new("RGB", size, _resolve_bg(mp, brand_colours))
+        canvas = _draw_text_stack(
+            canvas, (pad, pad + H // 8, W - pad, H - pad), headline, body, cta, brand_rgb,
+            head_size=max(72, H // 10), align=mp.get("align", "left"), anchor="center",
+        )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    if layout_mode == "quote":
+        canvas = Image.new("RGB", size, _resolve_bg(mp, brand_colours))
+        draw = ImageDraw.Draw(canvas)
+        qfont = _font(max(160, H // 5), bold=True)
+        sampled = _avg_rgb(canvas, (0, 0, W, H))
+        q_hex, _ = _pick_text_colour(sampled)
+        draw.text((pad, pad // 2), "“", font=qfont, fill=q_hex)
+        attribution = f"— {body}" if body else ""
+        canvas = _draw_text_stack(
+            canvas, (pad, H // 4, W - pad, H - pad), headline, attribution, cta, brand_rgb,
+            head_size=max(56, H // 14), anchor="center",
+        )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    if layout_mode == "stat":
+        canvas = Image.new("RGB", size, _resolve_bg(mp, brand_colours))
+        m = _re.search(r"(₹?\$?[\d,.]+%?[KMBkmb+]?)", headline or "")
+        stat = m.group(1) if m else (headline or "").split()[0] if headline else ""
+        rest = (headline or "").replace(stat, "", 1).strip(" -—:,")
+        draw = ImageDraw.Draw(canvas)
+        sfont = _font(max(160, H // 5), bold=True)
+        bb = draw.textbbox((0, 0), stat, font=sfont)
+        sampled = _avg_rgb(canvas, (0, 0, W, H))
+        s_hex, s_shadow = _pick_text_colour(sampled)
+        _draw_text_with_shadow(draw, (pad, H // 6), stat, sfont, fill=s_hex, shadow=s_shadow)
+        canvas = _draw_text_stack(
+            canvas, (pad, H // 6 + (bb[3] - bb[1]) + 40, W - pad, H - pad),
+            rest, body, cta, brand_rgb, head_size=max(44, H // 20), anchor="top",
+        )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    # ---------- image + panel splits ----------
+    if layout_mode in ("split_h", "split_v") and base_image:
+        canvas = Image.new("RGB", size, primary_rgb)
+        frac = float(mp.get("image_frac", 0.6))
+        img = Image.open(io.BytesIO(base_image)).convert("RGB")
+        if layout_mode == "split_h":
+            img_h = int(H * frac)
+            canvas.paste(ImageOps.fit(img, (W, img_h), Image.LANCZOS), (0, 0))
+            canvas = _draw_text_stack(
+                canvas, (pad, img_h + pad // 2, W - pad, H - pad), headline, body, cta, brand_rgb,
+                anchor="center",
+            )
+        else:
+            img_w = int(W * frac)
+            canvas.paste(ImageOps.fit(img, (img_w, H), Image.LANCZOS), (W - img_w, 0))
+            canvas = _draw_text_stack(
+                canvas, (pad, pad, W - img_w - pad, H - pad), headline, body, cta, brand_rgb,
+                anchor="center",
+            )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    # ---------- cutout family (subject_on_colour / polaroid / minimal) ----------
+    if layout_mode == "cutout" and cutout:
+        canvas = Image.new("RGB", size, _resolve_bg(mp, brand_colours))
+        subject = Image.open(io.BytesIO(cutout)).convert("RGBA")
+        scale = float(mp.get("subject_scale", 0.55))
+        target_w = int(W * scale)
+        r = target_w / max(1, subject.width)
+        subject = subject.resize((target_w, int(subject.height * r)), Image.LANCZOS)
+
+        if mp.get("polaroid"):
+            frame_pad, chin = 24, 90
+            card = Image.new("RGBA", (subject.width + 2 * frame_pad, subject.height + frame_pad + chin), (255, 255, 255, 255))
+            card.paste(subject, (frame_pad, frame_pad), subject)
+            card = card.rotate(float(mp.get("tilt_deg", -4)), expand=True, resample=Image.BICUBIC)
+            subject = card
+
+        sx = (W - subject.width) // 2
+        sy = max(pad, int(H * 0.42) - subject.height // 2)
+        if mp.get("shadow") and not mp.get("polaroid"):
+            sh = Image.new("RGBA", size, (0, 0, 0, 0))
+            ImageDraw.Draw(sh).ellipse(
+                [sx + subject.width // 6, sy + subject.height - 14,
+                 sx + subject.width * 5 // 6, sy + subject.height + 26],
+                fill=(0, 0, 0, 70))
+            canvas.paste(Image.alpha_composite(canvas.convert("RGBA"), sh.filter(ImageFilter.GaussianBlur(8))).convert("RGB"), (0, 0))
+        canvas.paste(subject, (sx, sy), subject)
+        canvas = _draw_text_stack(
+            canvas, (pad, int(H * 0.62), W - pad, H - pad), headline, body, cta, brand_rgb,
+        )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    # ---------- meme (top/bottom bands) ----------
+    if layout_mode == "meme" and base_image:
+        band = int(H * float(mp.get("band_frac", 0.16)))
+        canvas = Image.new("RGB", size, (12, 12, 12))
+        img = ImageOps.fit(Image.open(io.BytesIO(base_image)).convert("RGB"), (W, H - 2 * band), Image.LANCZOS)
+        canvas.paste(img, (0, band))
+        canvas = _draw_text_stack(
+            canvas, (pad, 0, W - pad, band), (headline or "").upper(), "", "", brand_rgb,
+            head_size=max(40, band - 36), align="center", anchor="center", text_rgb=(255, 255, 255),
+        )
+        canvas = _draw_text_stack(
+            canvas, (pad, H - band, W - pad, H), body or "", "", cta, brand_rgb,
+            head_size=max(28, band // 3), align="center", anchor="center", text_rgb=(255, 255, 255),
+        )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    # ---------- multi-asset arrangements ----------
+    assets = [a for a in (extra_assets or []) if a]
+    if layout_mode == "grid" and assets:
+        rows, cols = int(mp.get("rows", 2)), int(mp.get("cols", 2))
+        band = int(H * 0.24)
+        gap = pad // 2
+        cell_w = (W - gap * (cols + 1)) // cols
+        cell_h = (H - band - gap * (rows + 1)) // rows
+        canvas = Image.new("RGB", size, secondary_rgb)
+        for i in range(min(len(assets), rows * cols)):
+            r_i, c_i = divmod(i, cols)
+            cell = ImageOps.fit(Image.open(io.BytesIO(assets[i])).convert("RGB"), (cell_w, cell_h), Image.LANCZOS)
+            canvas.paste(cell, (gap + c_i * (cell_w + gap), gap + r_i * (cell_h + gap)))
+        ImageDraw.Draw(canvas).rectangle([0, H - band, W, H], fill=primary_rgb)
+        canvas = _draw_text_stack(
+            canvas, (pad, H - band, W - pad, H - pad // 2), headline, body, cta, brand_rgb, anchor="center",
+        )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    if layout_mode == "collage" and assets:
+        canvas = Image.new("RGB", size, _resolve_bg(mp, brand_colours))
+        spots = [(0.28, 0.30, 0.42, -8), (0.68, 0.26, 0.36, 6), (0.50, 0.52, 0.34, -3)]
+        for i, a in enumerate(assets[:3]):
+            cx_f, cy_f, sc, rot = spots[i % len(spots)]
+            piece = Image.open(io.BytesIO(a)).convert("RGBA")
+            tw = int(W * sc)
+            piece = piece.resize((tw, int(piece.height * tw / max(1, piece.width))), Image.LANCZOS)
+            piece = piece.rotate(rot, expand=True, resample=Image.BICUBIC)
+            canvas.paste(piece, (int(W * cx_f) - piece.width // 2, int(H * cy_f) - piece.height // 2), piece)
+        canvas = _draw_text_stack(
+            canvas, (pad, int(H * 0.70), W - pad, H - pad), headline, body, cta, brand_rgb,
+        )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    if layout_mode == "before_after" and len(assets) >= 2:
+        band = int(H * 0.22)
+        half_w = W // 2
+        canvas = Image.new("RGB", size, primary_rgb)
+        for i in range(2):
+            img = ImageOps.fit(Image.open(io.BytesIO(assets[i])).convert("RGB"), (half_w, H - band), Image.LANCZOS)
+            canvas.paste(img, (i * half_w, 0))
+        draw = ImageDraw.Draw(canvas, "RGBA")
+        draw.rectangle([half_w - 3, 0, half_w + 3, H - band], fill=(255, 255, 255, 255))
+        chip_font = _font(30, bold=True)
+        for i, label in enumerate(("Before", "After")):
+            bb = draw.textbbox((0, 0), label, font=chip_font)
+            cw = bb[2] - bb[0] + 36
+            cx = i * half_w + (half_w - cw) // 2
+            draw.rounded_rectangle([cx, pad, cx + cw, pad + 52], radius=26, fill=(17, 17, 17, 210))
+            draw.text((cx + 18, pad + (52 - bb[1] - bb[3]) // 2), label, font=chip_font, fill="white")
+        canvas = _draw_text_stack(
+            canvas, (pad, H - band, W - pad, H - pad // 2), headline, body, cta, brand_rgb, anchor="center",
+        )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    # ---------- editorial ----------
+    if layout_mode == "editorial" and base_image:
+        canvas = Image.new("RGB", size, (247, 245, 242))
+        win_f = float(mp.get("image_window_frac", 0.42))
+        win_w, win_h = int(W * win_f), int(H * 0.46)
+        img = ImageOps.fit(Image.open(io.BytesIO(base_image)).convert("RGB"), (win_w, win_h), Image.LANCZOS)
+        wx, wy = W - win_w - pad, H - win_h - pad
+        ImageDraw.Draw(canvas).rectangle([wx - 4, wy - 4, wx + win_w + 4, wy + win_h + 4], fill=(17, 17, 17))
+        canvas.paste(img, (wx, wy))
+        canvas = _draw_text_stack(
+            canvas, (pad, pad + H // 10, W - pad, wy - pad), headline, body, cta, brand_rgb,
+            head_size=max(72, H // 11), anchor="top", text_rgb=(17, 17, 17),
+        )
+        return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))
+
+    # ---------- fallbacks ----------
+    if base_image:
+        return composite(
+            channel=channel, dimensions=dimensions, base_image=base_image,
+            headline=headline, cta=cta, body=body,
+            brand_colour=brand_colours[0] if brand_colours else "#111111",
+            logo_bytes=logo_bytes, template_config=template_config,
+            partner_logo_bytes=partner_logo_bytes, partner_name=partner_name,
+        )
+    canvas = Image.new("RGB", size, primary_rgb)
+    canvas = _draw_text_stack(canvas, (pad, pad, W - pad, H - pad), headline, body, cta, brand_rgb, anchor="center")
+    return _webp(_paste_logos(canvas, logo_bytes, partner_logo_bytes, cfg, pad))

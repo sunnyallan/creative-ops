@@ -43,6 +43,54 @@ class BriefingState(TypedDict, total=False):
     content_type: str  # banner | social_post | social_carousel
     research_notes: str | None
     carousel_slide_count: int
+    layout_style: str  # 'auto' or a key from layouts.LAYOUTS
+
+
+def pick_layout(state: BriefingState) -> BriefingState:
+    """Resolve layout_style: 'auto' → Gemini Flash picks from the registry;
+    explicit key → validated pass-through. Result persisted on the campaign."""
+    from layouts import LAYOUTS, registry_for_prompt
+
+    requested = state.get("layout_style") or "auto"
+    if requested != "auto" and requested in LAYOUTS:
+        chosen = requested
+    else:
+        brand_kit = state.get("brand_kit") or {}
+        prompt = (
+            "Pick the single best layout style for this creative campaign. "
+            "Reply with ONLY the layout key, nothing else.\n\n"
+            f"CAMPAIGN GOAL: {state['campaign_goal']}\n"
+            f"CONTENT TYPE: {state.get('content_type', 'banner')}\n"
+            f"BRAND FEEL: {brand_kit.get('brand_feel') or brand_kit.get('tone') or 'unknown'}\n"
+            f"RESEARCH-DRIVEN: {'yes' if state.get('research_notes') else 'no'}\n\n"
+            "Guidance: stat_callout suits research/number-led posts; quote_card suits testimonials; "
+            "typo_hero and gradient_typo suit announcement-style messages; product/subject layouts "
+            "suit tangible products; full_bleed and split layouts suit lifestyle campaigns.\n\n"
+            f"AVAILABLE LAYOUTS:\n{registry_for_prompt()}\n"
+        )
+        try:
+            resp = traced_generate(
+                model=MODEL_FLASH_LITE,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(temperature=0.2),
+                trace_name="briefing.pick_layout",
+                tenant_id=state["tenant_id"],
+                campaign_id=state["campaign_id"],
+                metadata={"content_type": state.get("content_type")},
+            )
+            candidate = (resp.text or "").strip().strip("`'\"").split()[0]
+            chosen = candidate if candidate in LAYOUTS else "full_bleed_photo"
+        except Exception:
+            chosen = "full_bleed_photo"
+
+    # Persist the resolved layout on the campaign so the worker + UI see it.
+    tenant_id = UUID(state["tenant_id"])
+    with tenant_connection(tenant_id) as conn:
+        conn.execute(
+            "UPDATE campaigns SET layout_style = %s WHERE id = %s",
+            (chosen, state["campaign_id"]),
+        )
+    return {**state, "layout_style": chosen}
 
 
 def _client() -> genai.Client:
@@ -323,6 +371,11 @@ def generate_brief(state: BriefingState) -> BriefingState:
                 padded["slide_index"] = channels[len(briefs)]["slide_index"]
             briefs.append(padded)
 
+    # Stamp the resolved layout onto every brief so the worker doesn't re-query.
+    resolved_layout = state.get("layout_style") or "full_bleed_photo"
+    for b in briefs:
+        b["layout_style"] = resolved_layout
+
     return {**state, "output_brief": briefs}
 
 
@@ -342,10 +395,12 @@ def build_graph():
     g.add_node("read_brand_kit", read_brand_kit)
     g.add_node("analyse_persona", analyse_persona)
     g.add_node("generate_brief", generate_brief)
+    g.add_node("pick_layout", pick_layout)
     g.add_node("persist_brief", persist_brief)
     g.set_entry_point("read_brand_kit")
     g.add_edge("read_brand_kit", "analyse_persona")
-    g.add_edge("analyse_persona", "generate_brief")
+    g.add_edge("analyse_persona", "pick_layout")
+    g.add_edge("pick_layout", "generate_brief")
     g.add_edge("generate_brief", "persist_brief")
     g.add_edge("persist_brief", END)
     return g
@@ -362,6 +417,7 @@ def run_briefing(
     content_type: str = "banner",
     research_notes: str | None = None,
     carousel_slide_count: int = 1,
+    layout_style: str = "auto",
 ) -> list[dict[str, Any]]:
     """Synchronous helper invoked from API or Celery task."""
     with PostgresSaver.from_conn_string(settings.supabase_db_url) as saver:
@@ -384,6 +440,7 @@ def run_briefing(
                 "content_type": content_type,
                 "research_notes": research_notes,
                 "carousel_slide_count": carousel_slide_count,
+                "layout_style": layout_style,
             },
             config=thread,
         )

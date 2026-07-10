@@ -22,6 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-bake the rembg u2net model (~170MB) into the image so containers don't
+# download it at first cutout request.
+RUN python -c "from rembg import new_session; new_session('u2net')"
+
 COPY . .
 
 EXPOSE 8000
