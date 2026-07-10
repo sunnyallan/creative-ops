@@ -22,5 +22,9 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
 
+    # v3.0 — self-hosted Penpot (design studio for custom templates)
+    penpot_base_url: str = ""       # public URL of the penpot-frontend service
+    penpot_access_token: str = ""   # personal access token generated in Penpot UI
+
 
 settings = Settings()

@@ -29,5 +29,11 @@ Built against `d89d3f2d-07e6-4ed9-9272-f8f63808309c.md` (architecture doc), slic
 ## Verification
 See plan file §Verification. Key checks: RLS isolation, governance flagging path, stubbed deployment row + `audit_log` after approve/reject.
 
+## Penpot (v3.0 custom templates)
+
+Custom creative templates are designed in a self-hosted Penpot instance and
+rendered by our pipeline. Setup runbook: [docs/penpot-railway-setup.md](docs/penpot-railway-setup.md).
+Backend needs `PENPOT_BASE_URL` + `PENPOT_ACCESS_TOKEN` env vars.
+
 ## Post-Monday (deferred)
 Qdrant + CLIP recycling, learning loop / PostgresStore, multi-persona briefs, governance retry-loop cap, Langfuse, Stripe billing, Google display + emailer channels, Falconsai stage 1.
