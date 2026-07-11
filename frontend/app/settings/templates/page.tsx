@@ -7,6 +7,7 @@ type Template = {
   id: string;
   name: string;
   penpot_file_id: string | null;
+  penpot_page_id: string | null;
   sync_status: "pending" | "synced" | "failed";
   sync_error: string | null;
   preview_url: string | null;
@@ -14,11 +15,13 @@ type Template = {
   last_synced_at: string | null;
 };
 
-const PENPOT_URL = process.env.NEXT_PUBLIC_PENPOT_URL || "";
-
 export default function TemplatesSettings() {
   const [list, setList] = useState<Template[]>([]);
   const [err, setErr] = useState<string | null>(null);
+
+  // Penpot connection info (from backend, so no NEXT_PUBLIC var needed)
+  const [penpotBase, setPenpotBase] = useState<string>("");
+  const [penpotConfigured, setPenpotConfigured] = useState<boolean | null>(null);
 
   // Register form
   const [name, setName] = useState("");
@@ -33,7 +36,20 @@ export default function TemplatesSettings() {
       setErr(e.message);
     }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    apiFetch<{ base_url: string; configured: boolean }>("/templates/penpot-info")
+      .then((info) => { setPenpotBase(info.base_url); setPenpotConfigured(info.configured); })
+      .catch(() => setPenpotConfigured(false));
+  }, []);
+
+  function editLink(t: Template): string | null {
+    if (!penpotBase || !t.penpot_file_id) return null;
+    const q = new URLSearchParams();
+    q.set("file-id", t.penpot_file_id);
+    if (t.penpot_page_id) q.set("page-id", t.penpot_page_id);
+    return `${penpotBase}/#/workspace?${q.toString()}`;
+  }
 
   // Poll while any syncs are pending (same pattern as brand references)
   useEffect(() => {
@@ -85,13 +101,21 @@ export default function TemplatesSettings() {
             can render straight into your design.
           </p>
         </div>
-        {PENPOT_URL && (
-          <a href={PENPOT_URL} target="_blank" rel="noreferrer"
+        {penpotBase && (
+          <a href={penpotBase} target="_blank" rel="noreferrer"
             className="shrink-0 rounded-md bg-neutral-900 px-4 py-2 text-sm text-white">
             Open Penpot ↗
           </a>
         )}
       </div>
+
+      {penpotConfigured === false && (
+        <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          Penpot isn't connected yet. Set <code>PENPOT_BASE_URL</code> and{" "}
+          <code>PENPOT_ACCESS_TOKEN</code> on the API + worker services (see{" "}
+          <span className="font-mono">docs/penpot-railway-setup.md</span>), then reload.
+        </div>
+      )}
 
       <details className="mt-4 rounded-md border bg-white p-4 text-sm">
         <summary className="cursor-pointer font-medium">How to design a template (placeholder convention)</summary>
@@ -172,6 +196,12 @@ export default function TemplatesSettings() {
                 <p className="text-xs text-amber-700">{t.sync_error}</p>
               )}
               <div className="flex gap-2 pt-1">
+                {editLink(t) && (
+                  <a href={editLink(t)!} target="_blank" rel="noreferrer"
+                    className="flex-1 rounded-md bg-neutral-900 px-2 py-1.5 text-center text-xs text-white hover:bg-neutral-800">
+                    Edit in Penpot ↗
+                  </a>
+                )}
                 <button onClick={() => resync(t.id)} className="flex-1 rounded-md border px-2 py-1.5 text-xs hover:bg-neutral-50">
                   Re-sync
                 </button>
@@ -179,6 +209,11 @@ export default function TemplatesSettings() {
                   Delete
                 </button>
               </div>
+              {editLink(t) && (
+                <p className="text-[11px] text-neutral-500">
+                  After editing in Penpot, click <b>Re-sync</b> to pull your changes.
+                </p>
+              )}
             </div>
           </article>
         ))}

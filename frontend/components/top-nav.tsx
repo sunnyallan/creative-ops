@@ -55,6 +55,9 @@ export function TopNav() {
           <Link href="/brands" className="rounded-md px-3 py-1.5 hover:bg-neutral-100">
             Brands
           </Link>
+          <Link href="/settings/templates" className="rounded-md px-3 py-1.5 hover:bg-neutral-100">
+            Templates
+          </Link>
           <Link href="/settings" className="rounded-md px-3 py-1.5 hover:bg-neutral-100">
             Settings
           </Link>

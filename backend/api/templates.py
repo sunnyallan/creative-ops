@@ -16,10 +16,22 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth import CurrentUser, current_user
+from config import settings
 from db.session import tenant_connection
 from storage import signed_url
 
 router = APIRouter(prefix="/templates", tags=["templates"])
+
+
+@router.get("/penpot-info")
+def penpot_info(user: CurrentUser = Depends(current_user)):
+    """Where the self-hosted Penpot lives + whether the platform can reach it.
+    Lets the frontend show 'Open in Penpot' links without a separate NEXT_PUBLIC var."""
+    base = (settings.penpot_base_url or "").rstrip("/")
+    return {
+        "base_url": base,
+        "configured": bool(base and settings.penpot_access_token),
+    }
 
 
 class TemplateIn(BaseModel):
