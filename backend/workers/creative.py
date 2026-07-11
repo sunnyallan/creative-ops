@@ -644,14 +644,46 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
     path = f"tenants/{tenant_id}/creatives/{campaign_id}/{creative_id}.webp"
     upload_bytes(path, composed, "image/webp")
 
+    # ----- v3.1: text-free background for the in-app editor -----
+    # Re-render with blank copy so the browser editor can overlay editable text
+    # layers without the baked text showing through. Non-fatal on failure.
+    edit_background_path: str | None = None
+    try:
+        if template_row is not None:
+            from workers.template_renderer import render_template as _rt
+            bg = _rt(
+                template_row[0], headline="", body="", cta="",
+                images=(extra_assets if extra_assets else ([image_bytes] if image_bytes else [])),
+                logo_bytes=logo_bytes, partner_logo_bytes=partner_logo_bytes,
+                slide_pip=None, out_width=out_w, out_height=out_h,
+            )
+        else:
+            from workers.compositor import render_layout as _rl
+            bg = _rl(
+                layout_mode=layout.get("compositor_mode", "overlay"),
+                mode_params=layout.get("mode_params") or {},
+                channel=brief["channel"], dimensions=brief.get("dimensions", "1080x1080"),
+                base_image=image_bytes, cutout=cutout_bytes, extra_assets=extra_assets,
+                headline="", body="", cta="",
+                brand_colours=brand_colours, logo_bytes=logo_bytes,
+                partner_logo_bytes=partner_logo_bytes,
+                template_config=brand_kit.get("template_config"), partner_name=partner_name,
+            )
+        edit_background_path = f"tenants/{tenant_id}/creatives/{campaign_id}/{creative_id}_bg.webp"
+        upload_bytes(edit_background_path, bg, "image/webp")
+    except Exception as e:
+        import logging
+        logging.getLogger("creative").warning("edit background render failed: %s", e)
+        edit_background_path = None
+
     with tenant_connection(t_uuid) as conn:
         conn.execute(
             """
             insert into creatives (id, tenant_id, campaign_id, brand_id, channel, dimensions,
                                    copy_headline, copy_body, copy_cta, storage_path,
                                    governance_status, human_status, persona_segment, slide_index,
-                                   layout_style, template_id)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s, %s, %s, %s)
+                                   layout_style, template_id, edit_background_path)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s, %s, %s, %s, %s)
             """,
             (
                 str(creative_id), str(t_uuid), campaign_id,
@@ -662,6 +694,7 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
                 slide_index,
                 layout_key,
                 str(campaign_template_id) if campaign_template_id else None,
+                edit_background_path,
             ),
         )
         conn.execute(

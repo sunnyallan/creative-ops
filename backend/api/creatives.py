@@ -1,3 +1,5 @@
+import base64
+import uuid as _uuid
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,7 +7,7 @@ from pydantic import BaseModel
 
 from auth import CurrentUser, current_user
 from db.session import tenant_connection
-from storage import signed_url
+from storage import signed_url, upload_bytes
 
 router = APIRouter(prefix="/creatives", tags=["creatives"])
 
@@ -106,6 +108,104 @@ def approve(creative_id: UUID, user: CurrentUser = Depends(current_user)):
         copy={"headline": row[2], "body": row[3], "cta": row[4]},
     )
     return {"ok": True}
+
+
+class EditDataOut(BaseModel):
+    id: UUID
+    dimensions: str
+    background_url: str | None   # text-free base to draw editable text over
+    fallback_url: str | None     # composed image (used if no background available)
+    headline: str | None
+    body: str | None
+    cta: str | None
+    brand_colour: str | None
+    edit_layout: dict | None     # saved text-layer positions from a prior edit
+    editable: bool               # false when no text-free background exists
+
+
+@router.get("/{creative_id}/edit-data", response_model=EditDataOut)
+def get_edit_data(creative_id: UUID, user: CurrentUser = Depends(current_user)):
+    with tenant_connection(user.tenant_id) as conn:
+        row = conn.execute(
+            "SELECT c.dimensions, c.edit_background_path, c.storage_path, "
+            "c.copy_headline, c.copy_body, c.copy_cta, c.edit_layout, c.brand_id "
+            "FROM creatives c WHERE c.id = %s AND c.tenant_id = %s",
+            (str(creative_id), str(user.tenant_id)),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "creative not found")
+        brand_colour = None
+        if row[7]:
+            b = conn.execute(
+                "SELECT primary_colour FROM brands WHERE id = %s", (str(row[7]),),
+            ).fetchone()
+            brand_colour = b[0] if b else None
+
+    def _url(p):
+        if not p:
+            return None
+        try:
+            return signed_url(p)
+        except Exception:
+            return None
+
+    return EditDataOut(
+        id=creative_id,
+        dimensions=row[0],
+        background_url=_url(row[1]),
+        fallback_url=_url(row[2]),
+        headline=row[3], body=row[4], cta=row[5],
+        brand_colour=brand_colour,
+        edit_layout=row[6],
+        editable=bool(row[1]),
+    )
+
+
+class EditSaveIn(BaseModel):
+    image_data_url: str          # data:image/webp;base64,… composited in the browser
+    edit_layout: dict            # text-layer positions to persist for re-editing
+
+
+@router.post("/{creative_id}/edit")
+def save_edit(creative_id: UUID, payload: EditSaveIn, user: CurrentUser = Depends(current_user)):
+    # Decode the browser-composited image
+    data = payload.image_data_url
+    if "," in data:
+        data = data.split(",", 1)[1]
+    try:
+        img_bytes = base64.b64decode(data)
+    except Exception:
+        raise HTTPException(400, "invalid image data")
+    if len(img_bytes) > 8_000_000:
+        raise HTTPException(413, "edited image too large")
+
+    with tenant_connection(user.tenant_id) as conn:
+        row = conn.execute(
+            "SELECT campaign_id FROM creatives WHERE id = %s AND tenant_id = %s",
+            (str(creative_id), str(user.tenant_id)),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "creative not found")
+        campaign_id = row[0]
+
+    import json as _json
+    path = f"tenants/{user.tenant_id}/creatives/{campaign_id}/{creative_id}_edited_{_uuid.uuid4().hex[:8]}.webp"
+    try:
+        upload_bytes(path, img_bytes, "image/webp")
+    except Exception as e:
+        raise HTTPException(500, f"upload failed: {e}")
+
+    with tenant_connection(user.tenant_id) as conn:
+        conn.execute(
+            "UPDATE creatives SET storage_path = %s, edit_layout = %s::jsonb WHERE id = %s",
+            (path, _json.dumps(payload.edit_layout), str(creative_id)),
+        )
+        conn.execute(
+            "insert into audit_log (tenant_id, user_id, action, entity, entity_id) "
+            "values (%s, %s, %s, %s, %s)",
+            (str(user.tenant_id), str(user.user_id), "creative.edited", "creative", str(creative_id)),
+        )
+    return {"ok": True, "image_url": signed_url(path)}
 
 
 @router.post("/{creative_id}/reject")

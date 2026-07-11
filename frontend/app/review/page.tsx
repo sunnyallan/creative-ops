@@ -202,6 +202,9 @@ export default function ReviewPage() {
                 <button onClick={() => approve(c.id)} className="flex-1 rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white">
                   Approve
                 </button>
+                <a href={`/creatives/${c.id}/edit`} className="flex-1 rounded-md border px-3 py-1.5 text-center text-sm hover:bg-neutral-50">
+                  Edit
+                </a>
                 <button onClick={() => setRejecting(c)} className="flex-1 rounded-md border px-3 py-1.5 text-sm">
                   Reject
                 </button>
