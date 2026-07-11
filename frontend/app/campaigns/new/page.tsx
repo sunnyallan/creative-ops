@@ -21,6 +21,13 @@ type LayoutOption = {
   asset_plan: string;
 };
 
+type TemplateOption = {
+  id: string;
+  name: string;
+  sync_status: string;
+  preview_url: string | null;
+};
+
 export default function NewCampaign() {
   const router = useRouter();
   const { brands, activeBrandId, setActiveBrandId, activeBrand, loading: brandsLoading } = useBrand();
@@ -33,10 +40,12 @@ export default function NewCampaign() {
   const [researchTopic, setResearchTopic] = useState("");
   const [carouselSlides, setCarouselSlides] = useState(5);
 
-  // v3.0 — layout style
+  // v3.0 — layout style + custom templates
   const [layouts, setLayouts] = useState<LayoutOption[]>([]);
   const [layoutStyle, setLayoutStyle] = useState<string>("auto");
   const [showAllLayouts, setShowAllLayouts] = useState(false);
+  const [templates, setTemplates] = useState<TemplateOption[]>([]);
+  const [templateId, setTemplateId] = useState<string | null>(null);
 
   const [productFile, setProductFile] = useState<File | null>(null);
 
@@ -63,6 +72,9 @@ export default function NewCampaign() {
       if (ps.length > 0) setPartnerMode("existing");
     }).catch(() => {});
     apiFetch<LayoutOption[]>("/layouts").then(setLayouts).catch(() => {});
+    apiFetch<TemplateOption[]>("/templates")
+      .then((ts) => setTemplates(ts.filter((t) => t.sync_status === "synced")))
+      .catch(() => {});
   }, []);
 
   // Reset personas when the active brand changes
@@ -134,6 +146,7 @@ export default function NewCampaign() {
           research_topic: researchTopic.trim() || null,
           carousel_slide_count: contentType === "social_carousel" ? carouselSlides : 1,
           layout_style: layoutStyle,
+          template_id: templateId,
         }),
       });
       router.push(`/campaigns/${c.id}`);
@@ -253,7 +266,45 @@ export default function NewCampaign() {
         </label>
 
         <fieldset className="rounded-md border p-3">
-          <legend className="px-1 text-sm font-medium">Layout style</legend>
+          <legend className="px-1 text-sm font-medium">Design</legend>
+
+          {templates.length > 0 && (
+            <div className="mb-3">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs font-medium text-neutral-600">Your Penpot templates</span>
+                {templateId && (
+                  <button type="button" onClick={() => setTemplateId(null)} className="text-xs text-blue-600">
+                    clear — use a layout instead
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setTemplateId(templateId === t.id ? null : t.id)}
+                    className={`w-28 shrink-0 rounded-md border text-left ${
+                      templateId === t.id ? "ring-2 ring-neutral-900" : "hover:border-neutral-400"
+                    }`}
+                  >
+                    {t.preview_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.preview_url} alt="" className="aspect-square w-full rounded-t-md object-contain bg-neutral-100" />
+                    ) : (
+                      <div className="aspect-square w-full rounded-t-md bg-neutral-100" />
+                    )}
+                    <div className="truncate px-1.5 py-1 text-[11px] font-medium">{t.name}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className={templateId ? "pointer-events-none opacity-40" : ""}>
+          {templateId && (
+            <p className="mb-2 text-xs text-neutral-500">Template selected — layout styles don't apply.</p>
+          )}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <button
               type="button"
@@ -290,6 +341,7 @@ export default function NewCampaign() {
               {showAllLayouts ? "Show fewer" : `Show all ${layouts.length} styles`}
             </button>
           )}
+          </div>
         </fieldset>
 
         <fieldset className="rounded-md border p-3">

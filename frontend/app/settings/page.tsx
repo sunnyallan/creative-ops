@@ -9,6 +9,7 @@ export default function SettingsHome() {
         <Card href="/settings/template" title="Template" desc="Logo position, title bar, CTA style (tenant-wide)" />
         <Card href="/settings/channels" title="Channels" desc="Custom sizes per channel (tenant-wide)" />
         <Card href="/settings/partners" title="Partners" desc="Reusable co-brand partners (shared across brands)" />
+        <Card href="/settings/templates" title="Templates" desc="Penpot-designed creative templates with live placeholders" />
       </div>
     </main>
   );
