@@ -9,6 +9,7 @@ from api.creatives import router as creatives_router
 from api.partners import router as partners_router
 from api.personas import router as personas_router
 from api.template import router as template_router
+from api.templates import router as templates_router
 from auth import CurrentUser, current_user
 
 app = FastAPI(title="Creative Ops API")
@@ -41,3 +42,4 @@ app.include_router(creatives_router)
 app.include_router(partners_router)
 app.include_router(personas_router)
 app.include_router(template_router)
+app.include_router(templates_router)

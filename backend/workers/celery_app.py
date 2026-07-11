@@ -11,6 +11,7 @@ celery_app = Celery(
         "workers.governance",
         "workers.style_extractor",
         "workers.research",
+        "workers.template_sync",
     ],
 )
 

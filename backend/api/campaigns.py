@@ -45,8 +45,9 @@ class CampaignIn(BaseModel):
     content_type: str = Field("banner")  # banner | social_post | social_carousel
     research_topic: str | None = None
     carousel_slide_count: int = Field(1, ge=1, le=10)
-    # v3.0 — layout engine
+    # v3.0 — layout engine + custom templates
     layout_style: str = Field("auto")  # 'auto' or a key from layouts.LAYOUTS
+    template_id: UUID | None = None    # synced Penpot template (overrides layout)
 
 
 class CampaignOut(BaseModel):
@@ -65,6 +66,7 @@ class CampaignOut(BaseModel):
     research_notes: str | None = None
     carousel_slide_count: int = 1
     layout_style: str = "auto"
+    template_id: UUID | None = None
 
 
 @router.post("", response_model=CampaignOut)
@@ -85,8 +87,8 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
         conn.execute(
             "insert into campaigns (id, tenant_id, brand_id, goal, persona_segment, status, "
             "copy_constraints, partner_brand, product_image_path, "
-            "content_type, research_topic, carousel_slide_count, layout_style) "
-            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s)",
+            "content_type, research_topic, carousel_slide_count, layout_style, template_id) "
+            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s)",
             (
                 str(campaign_id), str(user.tenant_id), str(brand_id) if brand_id else None,
                 payload.goal, payload.persona_segment,
@@ -94,6 +96,7 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
                 partner_json, payload.product_image_path,
                 payload.content_type, payload.research_topic, slide_count,
                 payload.layout_style,
+                str(payload.template_id) if payload.template_id else None,
             ),
         )
         # Auto-save / refresh the partner record so it's reusable next time
@@ -178,6 +181,8 @@ def create_campaign(payload: CampaignIn, user: CurrentUser = Depends(current_use
         research_topic=payload.research_topic,
         research_notes=research_notes_text,
         carousel_slide_count=slide_count,
+        layout_style=payload.layout_style,
+        template_id=payload.template_id,
     )
 
 
@@ -219,7 +224,7 @@ def get_campaign(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
         row = conn.execute(
             "SELECT id, goal, persona_segment, status, brief, copy_constraints, partner_brand, "
             "brand_id, product_image_path, content_type, research_topic, research_notes, "
-            "carousel_slide_count, layout_style FROM campaigns WHERE id = %s",
+            "carousel_slide_count, layout_style, template_id FROM campaigns WHERE id = %s",
             (str(campaign_id),),
         ).fetchone()
     if not row:
@@ -233,5 +238,6 @@ def get_campaign(campaign_id: UUID, user: CurrentUser = Depends(current_user)):
         research_topic=row[10], research_notes=row[11],
         carousel_slide_count=row[12] or 1,
         layout_style=row[13] or "auto",
+        template_id=row[14],
         persona_segments=list({b.get("persona_segment") for b in (row[4] or []) if b.get("persona_segment")}),
     )

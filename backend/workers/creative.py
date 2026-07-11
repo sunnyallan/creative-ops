@@ -437,7 +437,7 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
     with tenant_connection(t_uuid) as conn:
         row = conn.execute(
             "SELECT brief, copy_constraints, partner_brand, brand_id, product_image_path, "
-            "content_type, carousel_slide_count "
+            "content_type, carousel_slide_count, template_id "
             "FROM campaigns WHERE id = %s AND tenant_id = %s",
             (campaign_id, str(t_uuid)),
         ).fetchone()
@@ -451,6 +451,23 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
     product_image_path = row[4]
     content_type = row[5] or "banner"
     slide_count = row[6] or 1
+    campaign_template_id = row[7]
+
+    # Load the synced template (if this campaign uses one)
+    template_row = None
+    if campaign_template_id:
+        with tenant_connection(t_uuid) as conn:
+            template_row = conn.execute(
+                "SELECT svg_source, zones FROM templates "
+                "WHERE id = %s AND tenant_id = %s AND sync_status = 'synced'",
+                (str(campaign_template_id), str(t_uuid)),
+            ).fetchone()
+        if template_row is None:
+            import logging
+            logging.getLogger("creative").warning(
+                "campaign %s references template %s but it is not synced — falling back to layouts",
+                campaign_id, campaign_template_id,
+            )
 
     brand_kit = _load_brand(t_uuid, campaign_brand_id)
 
@@ -520,12 +537,21 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
 
     copy = _gen_copy(brand_kit, brief, tenant_id, campaign_id, copy_constraints)
 
-    # ----- v3.0 asset planner: layout decides what we generate -----
+    # ----- v3.0 asset planner: template zones or layout decide what we generate -----
     from layouts import get_layout, asset_plan_of
     layout_key = brief.get("layout_style") or "full_bleed_photo"
     layout = get_layout(layout_key)
-    plan, asset_count = asset_plan_of(layout_key)
-    if layout.get("image_prompt_fragment"):
+
+    if template_row is not None:
+        # Template drives everything: image slots in the zones dictate generation.
+        t_zones = template_row[1] or {}
+        image_slots = sorted(k for k in t_zones if k.startswith("image") and not k.startswith("_"))
+        plan = "multi" if len(image_slots) > 1 else ("full" if image_slots else "none")
+        asset_count = len(image_slots)
+        layout_key = "template"
+    else:
+        plan, asset_count = asset_plan_of(layout_key)
+    if template_row is None and layout.get("image_prompt_fragment"):
         brief["_layout_fragment"] = layout["image_prompt_fragment"]
 
     image_bytes: bytes | None = None
@@ -570,24 +596,49 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
         except Exception:
             logo_bytes = None
 
-    from workers.compositor import render_layout
-    composed = render_layout(
-        layout_mode=layout.get("compositor_mode", "overlay"),
-        mode_params=layout.get("mode_params") or {},
-        channel=brief["channel"],
-        dimensions=brief.get("dimensions", "1080x1080"),
-        base_image=image_bytes,
-        cutout=cutout_bytes,
-        extra_assets=extra_assets,
-        headline=copy.get("headline", ""),
-        body=copy.get("body", ""),
-        cta=copy.get("cta", ""),
-        brand_colours=brand_colours,
-        logo_bytes=logo_bytes,
-        partner_logo_bytes=partner_logo_bytes,
-        template_config=brand_kit.get("template_config"),
-        partner_name=partner_name,
-    )
+    if template_row is not None:
+        # ----- custom Penpot template render path -----
+        from workers.template_renderer import render_template
+        dims = brief.get("dimensions", "1080x1080")
+        try:
+            out_w, out_h = (int(v) for v in dims.lower().split("x"))
+        except Exception:
+            out_w = out_h = 1080
+        template_images = extra_assets if extra_assets else ([image_bytes] if image_bytes else [])
+        pip = None
+        if content_type == "social_carousel":
+            pip = f"{slide_index + 1}/{slide_count}"
+        composed = render_template(
+            template_row[0],
+            headline=copy.get("headline", ""),
+            body=copy.get("body", ""),
+            cta=copy.get("cta", ""),
+            images=template_images,
+            logo_bytes=logo_bytes,
+            partner_logo_bytes=partner_logo_bytes,
+            slide_pip=pip,
+            out_width=out_w,
+            out_height=out_h,
+        )
+    else:
+        from workers.compositor import render_layout
+        composed = render_layout(
+            layout_mode=layout.get("compositor_mode", "overlay"),
+            mode_params=layout.get("mode_params") or {},
+            channel=brief["channel"],
+            dimensions=brief.get("dimensions", "1080x1080"),
+            base_image=image_bytes,
+            cutout=cutout_bytes,
+            extra_assets=extra_assets,
+            headline=copy.get("headline", ""),
+            body=copy.get("body", ""),
+            cta=copy.get("cta", ""),
+            brand_colours=brand_colours,
+            logo_bytes=logo_bytes,
+            partner_logo_bytes=partner_logo_bytes,
+            template_config=brand_kit.get("template_config"),
+            partner_name=partner_name,
+        )
 
     creative_id = uuid.uuid4()
     path = f"tenants/{tenant_id}/creatives/{campaign_id}/{creative_id}.webp"
@@ -599,8 +650,8 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
             insert into creatives (id, tenant_id, campaign_id, brand_id, channel, dimensions,
                                    copy_headline, copy_body, copy_cta, storage_path,
                                    governance_status, human_status, persona_segment, slide_index,
-                                   layout_style)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s, %s, %s)
+                                   layout_style, template_id)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending', %s, %s, %s, %s)
             """,
             (
                 str(creative_id), str(t_uuid), campaign_id,
@@ -610,6 +661,7 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
                 brief.get("persona_segment"),
                 slide_index,
                 layout_key,
+                str(campaign_template_id) if campaign_template_id else None,
             ),
         )
         conn.execute(
