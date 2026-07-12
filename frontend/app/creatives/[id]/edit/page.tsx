@@ -65,10 +65,11 @@ export default function CreativeEditor() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [bgLoaded, setBgLoaded] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);  // which layer is in text-edit mode
 
   const stageRef = useRef<HTMLDivElement>(null);
   const bgImgRef = useRef<HTMLImageElement | null>(null);
-  const drag = useRef<{ key: string; startX: number; startY: number; ox: number; oy: number } | null>(null);
+  const drag = useRef<{ key: string; startX: number; startY: number; ox: number; oy: number; moved: boolean } | null>(null);
 
   const [W, H] = data ? parseDims(data.dimensions) : [1080, 1080];
   const DISPLAY_W = 560;
@@ -96,21 +97,32 @@ export default function CreativeEditor() {
   }, [data]);
 
   const onPointerDown = (e: React.PointerEvent, key: string) => {
-    if ((e.target as HTMLElement).isContentEditable) return; // let text edit
+    if (editingKey === key) return; // in text-edit mode — let the caret work
+    e.preventDefault();
     const l = layers.find((x) => x.key === key)!;
-    drag.current = { key, startX: e.clientX, startY: e.clientY, ox: l.xFrac, oy: l.yFrac };
+    drag.current = { key, startX: e.clientX, startY: e.clientY, ox: l.xFrac, oy: l.yFrac, moved: false };
     setSelected(key);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    // Capture on the layer element itself so move/up fire here even if the
+    // pointer leaves the element during a fast drag.
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
-  const onPointerMove = (e: React.PointerEvent) => {
+  const onLayerPointerMove = (e: React.PointerEvent) => {
     if (!drag.current) return;
     const dx = (e.clientX - drag.current.startX) / DISPLAY_W;
     const dy = (e.clientY - drag.current.startY) / DISPLAY_H;
-    setLayers((ls) => ls.map((l) => l.key === drag.current!.key
+    if (Math.abs(dx) > 0.002 || Math.abs(dy) > 0.002) drag.current.moved = true;
+    const k = drag.current.key;
+    setLayers((ls) => ls.map((l) => l.key === k
       ? { ...l, xFrac: Math.max(0, Math.min(0.95, drag.current!.ox + dx)), yFrac: Math.max(0, Math.min(0.95, drag.current!.oy + dy)) }
       : l));
   };
-  const onPointerUp = () => { drag.current = null; };
+  const onLayerPointerUp = (e: React.PointerEvent, key: string) => {
+    const wasDrag = drag.current?.moved;
+    drag.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch {}
+    // A tap that didn't move just selects; the double-click handler enters edit mode.
+    if (!wasDrag) setSelected(key);
+  };
 
   function updateLayer(key: string, patch: Partial<Layer>) {
     setLayers((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -202,57 +214,67 @@ export default function CreativeEditor() {
         </div>
       </div>
       <h1 className="mt-2 text-2xl font-semibold">Edit creative</h1>
-      <p className="text-sm text-neutral-600">Click text to edit · drag to reposition · use the panel to restyle.</p>
+      <p className="text-sm text-neutral-600">
+        <b>Drag</b> a text layer to move it · <b>double-click</b> to edit the words · restyle it in the panel.
+      </p>
 
       <div className="mt-5 flex flex-col gap-6 lg:flex-row">
         {/* Stage */}
         <div
           ref={stageRef}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          className="relative shrink-0 overflow-hidden rounded-lg border bg-neutral-100"
+          className="relative shrink-0 select-none overflow-hidden rounded-lg border bg-neutral-100"
           style={{ width: DISPLAY_W, height: DISPLAY_H }}
-          onClick={(e) => { if (e.target === stageRef.current) setSelected(null); }}
+          onPointerDown={(e) => { if (e.target === stageRef.current) { setSelected(null); setEditingKey(null); } }}
         >
           {(data.background_url || data.fallback_url) && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={(data.background_url || data.fallback_url)!} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
+            <img src={(data.background_url || data.fallback_url)!} alt="" draggable={false} className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
           )}
-          {layers.map((l) => (
-            <div
-              key={l.key}
-              onPointerDown={(e) => onPointerDown(e, l.key)}
-              onClick={() => setSelected(l.key)}
-              style={{
-                position: "absolute",
-                left: l.xFrac * DISPLAY_W,
-                top: l.yFrac * DISPLAY_H,
-                fontFamily: FONT,
-                fontWeight: l.weight,
-                fontSize: l.fontPx * scale,
-                color: l.color,
-                cursor: "move",
-                whiteSpace: "nowrap",
-                lineHeight: 1.1,
-                textShadow: l.pill ? "none" : "0 1px 2px rgba(0,0,0,0.4)",
-                background: l.pill ? l.pillColor : "transparent",
-                padding: l.pill ? `${l.fontPx * scale * 0.45}px ${l.fontPx * scale * 0.9}px` : 0,
-                borderRadius: l.pill ? 999 : 0,
-                outline: selected === l.key ? "2px solid #2563eb" : "none",
-                outlineOffset: 2,
-              }}
-            >
-              <span
-                contentEditable
-                suppressContentEditableWarning
-                onBlur={(e) => updateLayer(l.key, { text: e.currentTarget.textContent || "" })}
-                className="outline-none"
+          {layers.map((l) => {
+            const isEditing = editingKey === l.key;
+            return (
+              <div
+                key={l.key}
+                onPointerDown={(e) => onPointerDown(e, l.key)}
+                onPointerMove={onLayerPointerMove}
+                onPointerUp={(e) => onLayerPointerUp(e, l.key)}
+                onDoubleClick={() => { setEditingKey(l.key); setSelected(l.key); }}
+                style={{
+                  position: "absolute",
+                  left: l.xFrac * DISPLAY_W,
+                  top: l.yFrac * DISPLAY_H,
+                  fontFamily: FONT,
+                  fontWeight: l.weight,
+                  fontSize: l.fontPx * scale,
+                  color: l.color,
+                  cursor: isEditing ? "text" : "move",
+                  whiteSpace: "nowrap",
+                  lineHeight: 1.1,
+                  touchAction: "none",
+                  textShadow: l.pill ? "none" : "0 1px 2px rgba(0,0,0,0.4)",
+                  background: l.pill ? l.pillColor : "transparent",
+                  padding: l.pill ? `${l.fontPx * scale * 0.45}px ${l.fontPx * scale * 0.9}px` : 0,
+                  borderRadius: l.pill ? 999 : 0,
+                  outline: selected === l.key ? (isEditing ? "2px solid #16a34a" : "2px solid #2563eb") : "none",
+                  outlineOffset: 2,
+                }}
               >
-                {l.text}
-              </span>
-            </div>
-          ))}
+                <span
+                  contentEditable={isEditing}
+                  suppressContentEditableWarning
+                  onBlur={(e) => { updateLayer(l.key, { text: e.currentTarget.textContent || "" }); setEditingKey(null); }}
+                  onPointerDown={(e) => { if (isEditing) e.stopPropagation(); }}
+                  className="outline-none"
+                >
+                  {l.text}
+                </span>
+              </div>
+            );
+          })}
         </div>
+        {editingKey === null && selected && (
+          <p className="mt-1 text-xs text-neutral-500 lg:hidden">Double-tap a layer to edit its text.</p>
+        )}
 
         {/* Inspector */}
         <div className="flex-1 space-y-4">
