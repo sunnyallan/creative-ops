@@ -44,6 +44,9 @@ class BriefingState(TypedDict, total=False):
     research_notes: str | None
     carousel_slide_count: int
     layout_style: str  # 'auto' or a key from layouts.LAYOUTS
+    # v4.0 Phase A — learnings retrieved for this brief
+    learnings: list[dict[str, Any]]
+    learnings_block: str
 
 
 def pick_layout(state: BriefingState) -> BriefingState:
@@ -91,6 +94,42 @@ def pick_layout(state: BriefingState) -> BriefingState:
             (chosen, state["campaign_id"]),
         )
     return {**state, "layout_style": chosen}
+
+
+def retrieve_learnings(state: BriefingState) -> BriefingState:
+    """v4.0 Phase A — pull the top-k relevant learnings for this brand and
+    stamp them onto the state so generate_brief can inject them into the
+    Gemini prompt as a PROVEN LEARNINGS block. Non-fatal on any failure
+    (returns empty), so the pre-v4 path keeps working unchanged."""
+    try:
+        from learning_store import learnings_prompt_block, mark_applied, retrieve_for_brief
+
+        brand_kit = state.get("brand_kit") or {}
+        context_parts = [
+            state.get("campaign_goal") or "",
+            state.get("content_type") or "banner",
+            state.get("layout_style") or "",
+            brand_kit.get("brand_feel") or brand_kit.get("tone") or "",
+            (state.get("persona_segment") or "") if state.get("persona_segment") else "",
+        ]
+        context = " · ".join(p for p in context_parts if p)
+        learnings = retrieve_for_brief(
+            tenant_id=state["tenant_id"],
+            brand_id=state.get("brand_id"),
+            context=context,
+            k=8,
+        )
+        if learnings:
+            mark_applied(state["tenant_id"], [l["id"] for l in learnings])
+        return {
+            **state,
+            "learnings": learnings,
+            "learnings_block": learnings_prompt_block(learnings),
+        }
+    except Exception as e:
+        import logging
+        logging.getLogger("briefing_agent").warning("retrieve_learnings failed: %s", e)
+        return {**state, "learnings": [], "learnings_block": ""}
 
 
 def _client() -> genai.Client:
@@ -263,8 +302,11 @@ def generate_brief(state: BriefingState) -> BriefingState:
     if content_type == "social_carousel":
         extra_brief_fields = "Each object MUST also include: slide_index (0..N-1), slide_role (hook|point|cta).\n"
 
+    learnings_block = state.get("learnings_block") or ""
+
     prompt = (
         _brand_prefix(brand_kit)
+        + learnings_block
         + content_framing
         + research_block
         + brand_rules_block
@@ -396,11 +438,13 @@ def build_graph():
     g.add_node("analyse_persona", analyse_persona)
     g.add_node("generate_brief", generate_brief)
     g.add_node("pick_layout", pick_layout)
+    g.add_node("retrieve_learnings", retrieve_learnings)
     g.add_node("persist_brief", persist_brief)
     g.set_entry_point("read_brand_kit")
     g.add_edge("read_brand_kit", "analyse_persona")
     g.add_edge("analyse_persona", "pick_layout")
-    g.add_edge("pick_layout", "generate_brief")
+    g.add_edge("pick_layout", "retrieve_learnings")
+    g.add_edge("retrieve_learnings", "generate_brief")
     g.add_edge("generate_brief", "persist_brief")
     g.add_edge("persist_brief", END)
     return g
