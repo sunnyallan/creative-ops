@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from config import settings
 
@@ -12,6 +13,7 @@ celery_app = Celery(
         "workers.style_extractor",
         "workers.research",
         "workers.template_sync",
+        "workers.orchestrator_tick",
     ],
 )
 
@@ -19,4 +21,13 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    timezone="UTC",
+    beat_schedule={
+        # v4.0 Phase B — advance every running experiment every ~15 min.
+        # Requires a Celery beat process (add a `beat` service on Railway).
+        "orchestrator-tick": {
+            "task": "orchestrator.tick",
+            "schedule": crontab(minute="*/15"),
+        },
+    },
 )
