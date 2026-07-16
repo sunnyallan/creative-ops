@@ -28,6 +28,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "from rembg import new_session; new_session('u2net')"
 
 COPY . .
+RUN chmod +x /app/entrypoint-api.sh
 
 EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# API image default: run migrations then Uvicorn.
+# Worker + beat services override this in Railway with plain celery commands.
+CMD ["/app/entrypoint-api.sh"]

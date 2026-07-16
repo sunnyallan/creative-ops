@@ -28,9 +28,12 @@ loop with a persistent learning store and real Meta publishing.
 | Penpot | Railway services `penpot-frontend/backend/exporter` + `penpot-db` — **PARKED, non-functional** (see §8) |
 | Repo | GitHub `sunnyallan/creative-ops`, branch `main`; Railway API start command lives in UI (railway.json holds build/restart only) |
 
-**Deploy loop:** `git push` → Railway + Vercel auto-deploy. **SQL migrations are NEVER auto-applied** —
-paste each `backend/db/migrations/NNN_*.sql` into the Supabase SQL Editor manually. This has bitten us
-repeatedly (every "Failed to fetch" incident was an unapplied migration).
+**Deploy loop:** `git push` → Railway + Vercel auto-deploy. Migrations **auto-apply**
+on API boot via Alembic (as of 2026-07-16 — see `docs/migrations.md`). To add a new
+migration, drop the SQL in `backend/db/migrations/NNN_*.sql` AND add a matching wrapper
+in `backend/alembic/versions/mNNN_NNN_*.py` — the entrypoint script (`entrypoint-api.sh`)
+runs `alembic upgrade head` before Uvicorn starts. Worker + beat don't run migrations
+(to avoid races) — they trust the API to have applied them.
 
 ---
 
