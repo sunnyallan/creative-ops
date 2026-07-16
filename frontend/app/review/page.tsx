@@ -55,21 +55,31 @@ function groupCreatives(items: Creative[]): Array<
 
 const REJECT_TAGS = ["wrong-tone", "off-brand-colour", "wrong-imagery", "copy-error", "other"];
 
+const PAGE_SIZE = 24;
+
 export default function ReviewPage() {
   const qc = useQueryClient();
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["creatives", "pending_review"],
-    queryFn: () => apiFetch<Creative[]>("/creatives?status=pending_review"),
+  const [pages, setPages] = useState(1);
+  const { data, isLoading, error, isFetching } = useQuery({
+    queryKey: ["creatives", "pending_review", pages],
+    queryFn: () => apiFetch<Creative[]>(
+      `/creatives?status=pending_review&limit=${PAGE_SIZE * pages}&offset=0`
+    ),
     refetchInterval: (query) => {
-      // Poll while there's anything still being processed; slow down when the queue is settled.
       const list = (query.state.data as Creative[] | undefined) ?? [];
       const stillWorking = list.some(
         (c) => c.governance_status === "pending" || !c.image_url
       );
-      return stillWorking ? 8000 : 30000; // 8s when active, 30s when idle
+      return stillWorking ? 12000 : 60000; // 12s when active, 60s when idle
     },
     refetchIntervalInBackground: false,
+    // Keep prior page's data on screen while the next fetch is in flight —
+    // no scroll-position jump on refetch.
+    placeholderData: (prev) => prev,
+    staleTime: 4000,
   });
+
+  const canLoadMore = (data?.length ?? 0) >= PAGE_SIZE * pages;
 
   const [rejecting, setRejecting] = useState<Creative | null>(null);
   const [reason, setReason] = useState("");
@@ -120,7 +130,8 @@ export default function ReviewPage() {
                     </div>
                     {s.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={s.image_url} alt="" className="w-full aspect-square object-cover" />
+                      <img src={s.image_url} alt="" loading="lazy" decoding="async"
+                        className="w-full aspect-square object-cover" />
                     ) : (
                       <div className="aspect-square bg-neutral-100" />
                     )}
@@ -149,23 +160,13 @@ export default function ReviewPage() {
         {(data || []).filter((c) => !c.channel?.startsWith("instagram_carousel_slide")).map((c) => (
           <article key={c.id} className="rounded-lg border bg-white shadow-sm overflow-hidden">
             {c.media_type === "video" && c.video_url ? (
-              <div className="aspect-square bg-black flex items-center justify-center overflow-hidden relative">
-                <video
-                  src={c.video_url}
-                  poster={c.thumbnail_url || undefined}
-                  controls
-                  playsInline
-                  preload="metadata"
-                  className="max-w-full max-h-full"
-                />
-                <span className="absolute left-2 top-2 rounded-full bg-fuchsia-600 px-2 py-0.5 text-[10px] font-medium text-white">
-                  ▶ VIDEO{c.duration_seconds ? ` · ${Math.round(c.duration_seconds)}s` : ""}
-                </span>
-              </div>
+              <VideoThumb videoUrl={c.video_url} thumbnailUrl={c.thumbnail_url}
+                          durationSeconds={c.duration_seconds ?? null} />
             ) : c.image_url ? (
               <div className="aspect-square bg-neutral-100 flex items-center justify-center overflow-hidden">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={c.image_url} alt="" className="max-w-full max-h-full object-contain" />
+                <img src={c.image_url} alt="" loading="lazy" decoding="async"
+                  className="max-w-full max-h-full object-contain" />
               </div>
             ) : (
               <div className="aspect-square bg-neutral-200" />
@@ -232,7 +233,16 @@ export default function ReviewPage() {
         ))}
       </div>
 
-      {data && data.length === 0 && (
+      {canLoadMore && (
+        <div className="mt-6 text-center">
+          <button onClick={() => setPages((p) => p + 1)} disabled={isFetching}
+            className="btn text-sm">
+            {isFetching ? "Loading…" : `Load more (${PAGE_SIZE} at a time)`}
+          </button>
+        </div>
+      )}
+
+      {data && data.length === 0 && !isLoading && (
         <p className="mt-12 text-center text-neutral-500">Queue is empty.</p>
       )}
 
@@ -261,5 +271,51 @@ export default function ReviewPage() {
         </div>
       )}
     </main>
+  );
+}
+
+/** Poster-first video card. Only mounts the <video> element after the user
+ *  clicks play — until then we render a static <img> thumbnail. Saves the
+ *  moov-atom download for every video on the page. */
+function VideoThumb({
+  videoUrl, thumbnailUrl, durationSeconds,
+}: {
+  videoUrl: string;
+  thumbnailUrl?: string | null;
+  durationSeconds: number | null;
+}) {
+  const [playing, setPlaying] = useState(false);
+  return (
+    <div className="aspect-square bg-black flex items-center justify-center overflow-hidden relative">
+      {playing ? (
+        <video
+          src={videoUrl}
+          poster={thumbnailUrl || undefined}
+          controls autoPlay
+          playsInline
+          className="max-w-full max-h-full"
+        />
+      ) : (
+        <>
+          {thumbnailUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={thumbnailUrl} alt="" loading="lazy" decoding="async"
+              className="w-full h-full object-cover opacity-90" />
+          ) : (
+            <div className="w-full h-full bg-neutral-900" />
+          )}
+          <button
+            onClick={() => setPlaying(true)}
+            className="absolute inset-0 grid place-items-center group"
+            aria-label="Play video"
+          >
+            <span className="rounded-full bg-black/60 group-hover:bg-black/80 text-white h-14 w-14 grid place-items-center text-2xl transition">▶</span>
+          </button>
+        </>
+      )}
+      <span className="absolute left-2 top-2 rounded-full bg-fuchsia-600 px-2 py-0.5 text-[10px] font-medium text-white pointer-events-none">
+        ▶ VIDEO{durationSeconds ? ` · ${Math.round(durationSeconds)}s` : ""}
+      </span>
+    </div>
   );
 }

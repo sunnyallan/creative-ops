@@ -2,12 +2,12 @@ import base64
 import uuid as _uuid
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from auth import CurrentUser, current_user
 from db.session import tenant_connection
-from storage import signed_url, upload_bytes
+from storage import signed_url, signed_urls_batch, upload_bytes
 
 router = APIRouter(prefix="/creatives", tags=["creatives"])
 
@@ -40,10 +40,14 @@ class RejectIn(BaseModel):
     tag: str | None = None
 
 
-def _row_to_creative(row: tuple) -> CreativeOut:
+def _row_to_creative(row: tuple, url_map: dict[str, str] | None = None) -> CreativeOut:
+    """Hydrate a creative row. If url_map is supplied, use it (batch-signed);
+    otherwise fall back to per-path signing (used by single-item endpoints)."""
     def _sign(p):
         if not p:
             return None
+        if url_map is not None:
+            return url_map.get(p)
         try:
             return signed_url(p)
         except Exception:
@@ -72,8 +76,12 @@ def _row_to_creative(row: tuple) -> CreativeOut:
 def list_creatives(
     status: str | None = None,
     campaign_id: UUID | None = None,
+    limit: int = Query(24, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=5000),
     user: CurrentUser = Depends(current_user),
 ):
+    """Paginated list. Storage signed URLs are batched into ONE Supabase
+    roundtrip (was N per page) — the big perf win on the review page."""
     q = (
         "SELECT id, campaign_id, channel, dimensions, copy_headline, copy_body, copy_cta, "
         "tenant_id, storage_path, governance_status, governance_issues, "
@@ -92,10 +100,21 @@ def list_creatives(
     elif status:
         q += " AND human_status = %s"
         args.append(status)
-    q += " ORDER BY created_at DESC LIMIT 200"
+    q += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+    args.extend([limit, offset])
+
     with tenant_connection(user.tenant_id) as conn:
         rows = conn.execute(q, args).fetchall()
-    return [_row_to_creative(r) for r in rows]
+
+    # Collect every storage path across all rows, sign them in ONE batch call.
+    paths: list[str] = []
+    for r in rows:
+        for idx in (8, 18, 19):  # storage_path, video_path, thumbnail_path
+            p = r[idx] if len(r) > idx else None
+            if p:
+                paths.append(p)
+    url_map = signed_urls_batch(paths) if paths else {}
+    return [_row_to_creative(r, url_map) for r in rows]
 
 
 @router.post("/{creative_id}/approve")
