@@ -1,9 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 
-export default function MetaCallback() {
+// Force runtime rendering — this route is only ever hit as an OAuth redirect
+// with fresh ?code=&state= params, so prerendering it is pointless.
+export const dynamic = "force-dynamic";
+
+function CallbackInner() {
   const router = useRouter();
   const params = useSearchParams();
   const [state, setState] = useState<"working" | "ok" | "err">("working");
@@ -35,5 +39,13 @@ export default function MetaCallback() {
         </button>
       )}
     </div>
+  );
+}
+
+export default function MetaCallback() {
+  return (
+    <Suspense fallback={<div className="p-8 text-muted">Loading…</div>}>
+      <CallbackInner />
+    </Suspense>
   );
 }
