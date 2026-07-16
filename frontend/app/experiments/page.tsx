@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { useBrand } from "@/lib/brand-context";
-import { StatusChip } from "@/app/dashboard/page";
+import { StatusChip } from "@/components/status-chip";
 
 type Experiment = {
   id: string;

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { StatusChip } from "@/app/dashboard/page";
+import { StatusChip } from "@/components/status-chip";
 
 type Iteration = {
   id: string;

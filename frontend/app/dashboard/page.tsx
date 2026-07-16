@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { StatusChip } from "@/components/status-chip";
 
 type Experiment = {
   id: string;
@@ -199,15 +200,6 @@ function EmptyState({ title, body, cta }: { title: string; body: string; cta?: R
       {cta}
     </div>
   );
-}
-
-export function StatusChip({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    running: "chip-success", paused: "chip-warn",
-    awaiting_approval: "chip-warn", goal_met: "chip-accent",
-    budget_exhausted: "chip-info", stopped: "chip", failed: "chip-danger", draft: "chip",
-  };
-  return <span className={`chip ${map[status] || "chip"}`}>{status.replace(/_/g, " ")}</span>;
 }
 
 function timeAgo(iso: string): string {
