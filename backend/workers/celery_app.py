@@ -15,6 +15,7 @@ celery_app = Celery(
         "workers.template_sync",
         "workers.orchestrator_tick",
         "workers.social_watcher",
+        "workers.video",
     ],
 )
 

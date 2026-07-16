@@ -19,6 +19,10 @@ type Creative = {
   brand_id?: string | null;
   slide_index?: number;
   layout_style?: string | null;
+  media_type?: "image" | "video";
+  video_url?: string | null;
+  thumbnail_url?: string | null;
+  duration_seconds?: number | null;
 };
 
 // Group creatives into "review items". Carousel slides for the same
@@ -144,7 +148,21 @@ export default function ReviewPage() {
       <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {(data || []).filter((c) => !c.channel?.startsWith("instagram_carousel_slide")).map((c) => (
           <article key={c.id} className="rounded-lg border bg-white shadow-sm overflow-hidden">
-            {c.image_url ? (
+            {c.media_type === "video" && c.video_url ? (
+              <div className="aspect-square bg-black flex items-center justify-center overflow-hidden relative">
+                <video
+                  src={c.video_url}
+                  poster={c.thumbnail_url || undefined}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="max-w-full max-h-full"
+                />
+                <span className="absolute left-2 top-2 rounded-full bg-fuchsia-600 px-2 py-0.5 text-[10px] font-medium text-white">
+                  ▶ VIDEO{c.duration_seconds ? ` · ${Math.round(c.duration_seconds)}s` : ""}
+                </span>
+              </div>
+            ) : c.image_url ? (
               <div className="aspect-square bg-neutral-100 flex items-center justify-center overflow-hidden">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={c.image_url} alt="" className="max-w-full max-h-full object-contain" />

@@ -306,32 +306,35 @@ def _generate_creative_for_iteration(
     the campaign_id."""
     from agents.briefing_agent import run_briefing
     from workers.creative import generate_creative
+    from workers.video import generate_video
     import uuid as _uuid
 
     campaign_id = _uuid.uuid4()
-    # Map orchestrator format → content_type
-    content_type = {"static": "banner", "carousel": "social_carousel", "video": "banner"}[plan["format"]]
-    slide_count = 5 if plan["format"] == "carousel" else 1
+    fmt = plan["format"]
+    # Map orchestrator format → content_type + media_type
+    content_type = {"static": "banner", "carousel": "social_carousel", "video": "banner"}[fmt]
+    slide_count = 5 if fmt == "carousel" else 1
+    media_type = "video" if fmt == "video" else "image"
 
     with tenant_connection(tenant_id) as conn:
         conn.execute(
             "insert into campaigns (id, tenant_id, brand_id, goal, persona_segment, status, "
-            "copy_constraints, content_type, carousel_slide_count, layout_style) "
-            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s, %s, %s)",
+            "copy_constraints, content_type, carousel_slide_count, layout_style, media_type) "
+            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s, %s, %s, %s)",
             (
                 str(campaign_id), str(tenant_id),
                 experiment["brand_id"], plan.get("creative_brief", {}).get("goal") or experiment["goal"],
                 plan.get("persona"),
                 json.dumps({"headline_max_chars": 40, "body_max_chars": 90, "cta_max_chars": 20}),
-                content_type, slide_count, "auto",
+                content_type, slide_count, "auto", media_type,
             ),
         )
         conn.execute(
             "insert into audit_log (tenant_id, action, entity, entity_id, meta) "
             "values (%s, 'experiment.campaign.create', 'campaign', %s, %s::jsonb)",
             (str(tenant_id), str(campaign_id),
-             json.dumps({"experiment_id": experiment["id"], "iteration_id": iteration["id"]},
-                        default=str)),
+             json.dumps({"experiment_id": experiment["id"], "iteration_id": iteration["id"],
+                         "media_type": media_type}, default=str)),
         )
 
     # Run the briefing agent synchronously
@@ -347,15 +350,16 @@ def _generate_creative_for_iteration(
         carousel_slide_count=slide_count,
         layout_style="auto",
     )
-    # Fan out — one creative per brief object
+    # Fan out — one creative per brief object; route to video worker when needed
     with tenant_connection(tenant_id) as conn:
         brief_rows = conn.execute(
             "SELECT jsonb_array_length(brief) FROM campaigns WHERE id = %s",
             (str(campaign_id),),
         ).fetchone()
     n = int(brief_rows[0] or 0)
+    task_fn = generate_video if media_type == "video" else generate_creative
     for i in range(n):
-        generate_creative.delay(str(tenant_id), str(campaign_id), i)
+        task_fn.delay(str(tenant_id), str(campaign_id), i)
     return str(campaign_id)
 
 

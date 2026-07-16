@@ -157,6 +157,18 @@ class MetaAdsAdapter:
                 "/settings/connections before running meta_ads iterations"
             )
 
+        if format == "video":
+            # v4.0 Phase D: video ad publishing needs Meta's chunked upload
+            # (/act_x/advideos + video_hash-based creative). We have the mp4
+            # in storage; the chunked upload adapter lands in a follow-up.
+            # For now, fail cleanly so the orchestrator marks the iteration
+            # failed and releases budget — better than a half-published state.
+            raise RuntimeError(
+                "meta_ads video publishing is not yet wired — use "
+                "instagram_organic (Reels) or mock_ads for video iterations "
+                "until the chunked video-upload path ships"
+            )
+
         # Import here to keep the module import cheap (avoid httpx at boot)
         from meta_client import (create_ad, create_ad_creative, create_adset,
                                  create_campaign, create_link_ad_creative,

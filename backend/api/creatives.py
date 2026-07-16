@@ -29,6 +29,10 @@ class CreativeOut(BaseModel):
     persona_segment: str | None = None
     slide_index: int = 0
     layout_style: str | None = None
+    media_type: str = "image"                # 'image' | 'video'
+    video_url: str | None = None             # signed URL when media_type == 'video'
+    thumbnail_url: str | None = None
+    duration_seconds: float | None = None
 
 
 class RejectIn(BaseModel):
@@ -37,12 +41,18 @@ class RejectIn(BaseModel):
 
 
 def _row_to_creative(row: tuple) -> CreativeOut:
-    image_url = None
-    if row[8]:
+    def _sign(p):
+        if not p:
+            return None
         try:
-            image_url = signed_url(row[8])
+            return signed_url(p)
         except Exception:
-            image_url = None
+            return None
+    image_url = _sign(row[8])
+    media_type = row[17] if len(row) > 17 else "image"
+    video_path = row[18] if len(row) > 18 else None
+    thumbnail_path = row[19] if len(row) > 19 else None
+    duration = row[20] if len(row) > 20 else None
     return CreativeOut(
         id=row[0], campaign_id=row[1], channel=row[2], dimensions=row[3],
         headline=row[4], body=row[5], cta=row[6], image_url=image_url,
@@ -51,6 +61,10 @@ def _row_to_creative(row: tuple) -> CreativeOut:
         persona_segment=row[14] if len(row) > 14 else None,
         slide_index=row[15] if len(row) > 15 else 0,
         layout_style=row[16] if len(row) > 16 else None,
+        media_type=media_type or "image",
+        video_url=_sign(video_path),
+        thumbnail_url=_sign(thumbnail_path) or image_url,
+        duration_seconds=float(duration) if duration is not None else None,
     )
 
 
@@ -63,7 +77,8 @@ def list_creatives(
     q = (
         "SELECT id, campaign_id, channel, dimensions, copy_headline, copy_body, copy_cta, "
         "tenant_id, storage_path, governance_status, governance_issues, "
-        "human_status, human_rejection_reason, human_rejection_tag, persona_segment, slide_index, layout_style "
+        "human_status, human_rejection_reason, human_rejection_tag, persona_segment, slide_index, layout_style, "
+        "media_type, video_path, thumbnail_path, duration_seconds "
         "FROM creatives WHERE tenant_id = %s"
     )
     args: list = [str(user.tenant_id)]

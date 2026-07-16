@@ -81,24 +81,63 @@ class InstagramOrganicAdapter:
             )
 
         from meta_client import (create_ig_media_container, publish_ig_media,
-                                 with_retry)
+                                 with_retry, _base as _mc_base)
+        import httpx as _httpx
 
-        image_url = signed_url(storage_path)
         caption = " ".join(x for x in [copy.get("headline"), copy.get("body"),
                                         copy.get("cta")] if x) or ""
 
-        container = with_retry(
-            create_ig_media_container,
-            conn_info["ig_user_id"], conn_info["page_token"],
-            image_url=image_url, caption=caption,
-        )
-        _wait_for_container_ready(container["id"], conn_info["page_token"])
-        published = with_retry(
-            publish_ig_media,
-            conn_info["ig_user_id"], conn_info["page_token"],
-            container["id"],
-        )
-        media_id = published["id"]
+        if format == "video":
+            # Look up the video URL from the creative row (storage_path is the
+            # thumbnail for video creatives)
+            from db.session import tenant_connection as _tc
+            with _tc(tenant_uuid) as _conn:
+                r = _conn.execute(
+                    "SELECT video_path FROM creatives WHERE id = %s",
+                    (creative_id,),
+                ).fetchone()
+            if not r or not r[0]:
+                raise RuntimeError("video creative has no video_path — cannot publish Reel")
+            video_url = signed_url(r[0])
+            # IG Reels use media_type=REELS + video_url
+            container = with_retry(
+                lambda: _httpx.post(
+                    f"{_mc_base()}/{conn_info['ig_user_id']}/media",
+                    data={
+                        "media_type": "REELS",
+                        "video_url": video_url,
+                        "caption": caption[:2200],
+                        "share_to_feed": "true",
+                        "access_token": conn_info["page_token"],
+                    },
+                    timeout=60,
+                ),
+            )
+            container_json = container.json()
+            if container.status_code >= 400 or "id" not in container_json:
+                raise RuntimeError(f"IG Reel container failed: {container_json}")
+            _wait_for_container_ready(container_json["id"], conn_info["page_token"],
+                                      timeout_seconds=120)  # Reels take longer
+            published = with_retry(
+                publish_ig_media,
+                conn_info["ig_user_id"], conn_info["page_token"],
+                container_json["id"],
+            )
+            media_id = published["id"]
+        else:
+            image_url = signed_url(storage_path)
+            container = with_retry(
+                create_ig_media_container,
+                conn_info["ig_user_id"], conn_info["page_token"],
+                image_url=image_url, caption=caption,
+            )
+            _wait_for_container_ready(container["id"], conn_info["page_token"])
+            published = with_retry(
+                publish_ig_media,
+                conn_info["ig_user_id"], conn_info["page_token"],
+                container["id"],
+            )
+            media_id = published["id"]
 
         # Record into social_posts (also read by the watcher for metric polling)
         with tenant_connection(tenant_uuid) as conn:
