@@ -145,10 +145,27 @@ class MockAdsAdapter:
         log.info("[MOCK] cancel ad=%s", publish_ref.get("ad_id"))
 
 
-# Registry lookup used by the orchestrator publish node.
-_ADAPTERS: dict[str, MockAdsAdapter] = {"mock_ads": MockAdsAdapter()}
+# Registry lookup used by the orchestrator publish node. Phase C's meta_ads
+# and instagram_organic adapters register themselves into this dict on import.
+_ADAPTERS: dict = {"mock_ads": MockAdsAdapter()}
 
 
 def get_adapter(channel: str):
-    """Phase C will register meta_ads / instagram_organic here alongside mock_ads."""
-    return _ADAPTERS.get(channel) or _ADAPTERS["mock_ads"]
+    """Return the publisher adapter for `channel`, lazily importing the real
+    adapters so this module stays cheap. Falls back to mock when unknown."""
+    if channel in _ADAPTERS:
+        return _ADAPTERS[channel]
+    # Try to lazy-register Phase C adapters
+    if channel == "meta_ads":
+        try:
+            from integrations import meta_ads  # noqa: F401 side-effect: registers
+            return _ADAPTERS.get("meta_ads", _ADAPTERS["mock_ads"])
+        except Exception:
+            return _ADAPTERS["mock_ads"]
+    if channel in ("instagram_organic", "facebook_organic"):
+        try:
+            from integrations import instagram_organic  # noqa: F401
+            return _ADAPTERS.get(channel, _ADAPTERS["mock_ads"])
+        except Exception:
+            return _ADAPTERS["mock_ads"]
+    return _ADAPTERS["mock_ads"]

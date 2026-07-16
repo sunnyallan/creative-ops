@@ -5,6 +5,7 @@ from api.brand_references import router as brand_references_router
 from api.brands import router as brands_router
 from api.campaigns import router as campaigns_router, layouts_router
 from api.channels import router as channels_router
+from api.connections import router as connections_router
 from api.creatives import router as creatives_router
 from api.experiments import router as experiments_router
 from api.learnings import router as learnings_router
@@ -40,6 +41,7 @@ app.include_router(brands_router)
 app.include_router(campaigns_router)
 app.include_router(layouts_router)
 app.include_router(channels_router)
+app.include_router(connections_router)
 app.include_router(creatives_router)
 app.include_router(experiments_router)
 app.include_router(learnings_router)

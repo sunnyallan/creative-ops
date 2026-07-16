@@ -14,6 +14,7 @@ celery_app = Celery(
         "workers.research",
         "workers.template_sync",
         "workers.orchestrator_tick",
+        "workers.social_watcher",
     ],
 )
 
@@ -28,6 +29,13 @@ celery_app.conf.update(
         "orchestrator-tick": {
             "task": "orchestrator.tick",
             "schedule": crontab(minute="*/15"),
+        },
+        # v4.0 Phase C — hourly sweep of connected Meta/IG accounts to refresh
+        # social_posts + metrics_history so the distiller learns from every
+        # post on the connected channels, not only what we authored.
+        "social-watcher-hourly": {
+            "task": "social.watch",
+            "schedule": crontab(minute=7),   # off-cycle from orchestrator ticks
         },
     },
 )

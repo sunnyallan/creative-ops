@@ -26,5 +26,18 @@ class Settings(BaseSettings):
     penpot_base_url: str = ""       # public URL of the penpot-frontend service
     penpot_access_token: str = ""   # personal access token generated in Penpot UI
 
+    # v4.0 Phase C — Meta Marketing API integration
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_redirect_uri: str = ""                 # OAuth callback e.g. https://app.example/settings/connections/meta/callback
+    meta_api_version: str = "v21.0"
+    meta_use_sandbox: bool = False              # set True while awaiting App Review — uses ad-account sandbox mode
+    # Fernet key for encrypting stored OAuth tokens at rest. Generate with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    token_encryption_key: str = ""
+
+    # Base URL of THIS backend (used to build Meta OAuth state + callback URLs)
+    api_base_url: str = ""
+
 
 settings = Settings()
