@@ -2,5 +2,184 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light; }
-body { @apply bg-neutral-50 text-neutral-900; }
+/* ============================================================
+   v4.0 Phase E — Design tokens
+   Dark-first for ops surfaces; the `.dark` class on <html> controls it.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg:          #fafaf9;
+  --bg-elev:     #ffffff;
+  --bg-elev-2:   #ffffff;
+  --bg-sunken:   #f4f4f2;
+  --border:      #e6e5e0;
+  --border-strong: #d4d3cd;
+
+  /* Text */
+  --fg:          #171717;
+  --fg-muted:    #52525b;
+  --fg-subtle:   #a1a1aa;
+
+  /* Brand accents (app-level; not the tenant brand palette) */
+  --accent:        #6d28d9;      /* violet-700 */
+  --accent-fg:     #ffffff;
+  --accent-soft:   #ede9fe;
+  --accent-soft-fg:#5b21b6;
+
+  /* Semantic */
+  --success:       #16a34a;
+  --success-soft:  #dcfce7;
+  --success-soft-fg: #15803d;
+  --warn:          #d97706;
+  --warn-soft:     #fef3c7;
+  --warn-soft-fg:  #92400e;
+  --danger:        #dc2626;
+  --danger-soft:   #fee2e2;
+  --danger-soft-fg: #991b1b;
+  --info:          #2563eb;
+  --info-soft:     #dbeafe;
+  --info-soft-fg:  #1e40af;
+
+  /* Radii + shadow */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(15,15,20,0.04);
+  --shadow-md: 0 4px 12px -2px rgba(15,15,20,0.06), 0 2px 4px rgba(15,15,20,0.03);
+  --shadow-lg: 0 12px 28px -8px rgba(15,15,20,0.10), 0 4px 8px rgba(15,15,20,0.04);
+}
+
+html.dark {
+  color-scheme: dark;
+
+  --bg:          #0a0a0b;
+  --bg-elev:     #131316;
+  --bg-elev-2:   #1a1a1f;
+  --bg-sunken:   #060607;
+  --border:      #26262c;
+  --border-strong: #3a3a42;
+
+  --fg:          #f4f4f5;
+  --fg-muted:    #a1a1aa;
+  --fg-subtle:   #71717a;
+
+  --accent:        #8b5cf6;
+  --accent-fg:     #0a0a0b;
+  --accent-soft:   rgba(139, 92, 246, 0.15);
+  --accent-soft-fg:#c4b5fd;
+
+  --success:       #22c55e;
+  --success-soft:  rgba(34, 197, 94, 0.14);
+  --success-soft-fg:#86efac;
+  --warn:          #f59e0b;
+  --warn-soft:     rgba(245, 158, 11, 0.14);
+  --warn-soft-fg:  #fcd34d;
+  --danger:        #ef4444;
+  --danger-soft:   rgba(239, 68, 68, 0.14);
+  --danger-soft-fg:#fca5a5;
+  --info:          #3b82f6;
+  --info-soft:     rgba(59, 130, 246, 0.14);
+  --info-soft-fg:  #93c5fd;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 12px -2px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
+  --shadow-lg: 0 12px 28px -8px rgba(0,0,0,0.5), 0 4px 8px rgba(0,0,0,0.3);
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   Primitive component classes — used app-wide so pages we haven't
+   restyled yet still inherit the new palette.
+   ============================================================ */
+
+.surface       { background: var(--bg-elev);    border: 1px solid var(--border); border-radius: var(--r-lg); }
+.surface-2     { background: var(--bg-elev-2);  border: 1px solid var(--border); border-radius: var(--r-lg); }
+.surface-sunk  { background: var(--bg-sunken);  border: 1px solid var(--border); border-radius: var(--r-lg); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 0.5rem; padding: 0.5rem 0.875rem;
+  font-size: 0.875rem; font-weight: 500;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elev); color: var(--fg);
+  transition: background 120ms, border-color 120ms;
+  cursor: pointer;
+}
+.btn:hover { background: var(--bg-elev-2); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary  { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.btn-primary:hover { filter: brightness(1.05); background: var(--accent); }
+.btn-danger   { background: var(--danger); color: white; border-color: transparent; }
+.btn-danger:hover { filter: brightness(1.05); }
+.btn-ghost    { background: transparent; border-color: transparent; }
+.btn-ghost:hover { background: var(--bg-elev-2); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem; font-weight: 500;
+  border-radius: 999px;
+  background: var(--bg-sunken); color: var(--fg-muted);
+  border: 1px solid var(--border);
+}
+.chip-accent  { background: var(--accent-soft);  color: var(--accent-soft-fg);  border-color: transparent; }
+.chip-success { background: var(--success-soft); color: var(--success-soft-fg); border-color: transparent; }
+.chip-warn    { background: var(--warn-soft);    color: var(--warn-soft-fg);    border-color: transparent; }
+.chip-danger  { background: var(--danger-soft);  color: var(--danger-soft-fg);  border-color: transparent; }
+.chip-info    { background: var(--info-soft);    color: var(--info-soft-fg);    border-color: transparent; }
+
+.input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+}
+.input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+label.field { display: block; font-size: 0.8125rem; color: var(--fg-muted); margin-bottom: 0.25rem; }
+
+hr.rule { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+
+.text-muted   { color: var(--fg-muted); }
+.text-subtle  { color: var(--fg-subtle); }
+.text-fg      { color: var(--fg); }
+.bg-app       { background: var(--bg); }
+.bg-elev-app  { background: var(--bg-elev); }
+.bg-sunken-app{ background: var(--bg-sunken); }
+.border-app   { border-color: var(--border); }
+.border-strong{ border-color: var(--border-strong); }
+
+.gauge {
+  height: 8px;
+  background: var(--bg-sunken);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.gauge-fill      { height: 100%; background: var(--accent); transition: width 240ms ease; }
+.gauge-committed { position: absolute; top: 0; height: 100%; background: var(--warn); opacity: 0.35; }
+
+.timeline-dot {
+  width: 10px; height: 10px; border-radius: 999px;
+  background: var(--fg-subtle); flex-shrink: 0;
+}
+.timeline-dot.active  { background: var(--accent);  box-shadow: 0 0 0 4px var(--accent-soft); }
+.timeline-dot.success { background: var(--success); }
+.timeline-dot.warn    { background: var(--warn); }
+.timeline-dot.danger  { background: var(--danger); }

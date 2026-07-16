@@ -91,12 +91,12 @@ export default function ReviewPage() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <h1 className="text-3xl font-semibold">Review queue</h1>
-      <p className="mt-1 text-neutral-600">Approve or reject creatives. Approvals go to platform deployers (stubbed for beta).</p>
+    <main className="mx-auto max-w-6xl px-6 py-8">
+      <h1 className="text-2xl font-semibold text-fg">Review queue</h1>
+      <p className="mt-1 text-sm text-muted">Approve, edit, or reject creatives. Approvals go to platform deployers.</p>
 
-      {isLoading && <p className="mt-6">Loading…</p>}
-      {error && <p className="mt-6 text-red-600">{(error as Error).message}</p>}
+      {isLoading && <p className="mt-6 text-muted">Loading…</p>}
+      {error && <p className="mt-6 text-danger-fg">{(error as Error).message}</p>}
 
       {/* Carousel items first — they span the full width as horizontal strips */}
       <div className="mt-6 space-y-6">

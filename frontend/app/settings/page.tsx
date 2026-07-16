@@ -2,14 +2,18 @@ import Link from "next/link";
 
 export default function SettingsHome() {
   return (
-    <main className="mx-auto max-w-2xl px-6 py-10">
-      <h1 className="text-3xl font-semibold">Settings</h1>
-      <div className="mt-6 space-y-3">
-        <Card href="/brands" title="Brands" desc="Multiple brands per workspace — colours, personas, references" />
-        <Card href="/settings/templates" title="Design templates (Penpot)" desc="Design custom layouts in Penpot with live placeholders, then render into them" />
-        <Card href="/settings/template" title="Asset placement" desc="Default logo position, title bar & CTA style for the built-in layouts" />
-        <Card href="/settings/channels" title="Channels" desc="Custom sizes per channel (tenant-wide)" />
-        <Card href="/settings/partners" title="Partners" desc="Reusable co-brand partners (shared across brands)" />
+    <main className="mx-auto max-w-3xl px-6 py-8">
+      <h1 className="text-2xl font-semibold text-fg">Settings</h1>
+      <p className="text-sm text-muted mt-0.5">
+        Workspace-level configuration.
+      </p>
+      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Card href="/brands" title="Brands" desc="Colours, personas, references, rules" />
+        <Card href="/settings/connections" title="Connections" desc="Meta / Instagram / Facebook page publishing" />
+        <Card href="/settings/templates" title="Design templates" desc="Penpot-designed custom layouts with placeholders" />
+        <Card href="/settings/template" title="Asset placement" desc="Default logo position, title bar, CTA style" />
+        <Card href="/settings/channels" title="Channels" desc="Custom output sizes per channel" />
+        <Card href="/settings/partners" title="Partners" desc="Reusable co-brand partners" />
       </div>
     </main>
   );
@@ -17,9 +21,9 @@ export default function SettingsHome() {
 
 function Card({ href, title, desc }: { href: string; title: string; desc: string }) {
   return (
-    <Link href={href} className="block rounded-lg border bg-white p-4 hover:bg-neutral-50">
-      <div className="font-medium">{title}</div>
-      <div className="text-sm text-neutral-600">{desc}</div>
+    <Link href={href} className="surface p-4 hover:border-strong transition">
+      <div className="text-fg font-medium">{title}</div>
+      <div className="text-sm text-muted mt-1">{desc}</div>
     </Link>
   );
 }

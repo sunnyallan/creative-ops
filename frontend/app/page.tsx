@@ -13,24 +13,29 @@ export default function Home() {
       const sb = supabaseBrowser();
       const { data: { session } } = await sb.auth.getSession();
       if (session) {
-        router.replace("/campaigns/new");
+        router.replace("/dashboard");
       } else {
         setChecking(false);
       }
     })();
   }, [router]);
 
-  if (checking) return <main className="p-12">Loading…</main>;
+  if (checking) {
+    return <main className="p-12 text-muted">Loading…</main>;
+  }
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-20">
-      <h1 className="text-4xl font-semibold tracking-tight">Creative Ops</h1>
-      <p className="mt-3 text-neutral-600">
-        AI-native creative operations. Brief in, on-brand creatives out.
+      <div className="chip chip-accent mb-6">v4.0 · Autonomous growth engine</div>
+      <h1 className="text-5xl font-semibold tracking-tight text-fg">Creative Ops</h1>
+      <p className="mt-4 text-lg text-muted max-w-xl">
+        Set a goal and a budget. The system researches, generates on-brand creatives,
+        publishes them, measures what works, learns, and iterates — until the goal is
+        met or the budget is spent.
       </p>
-      <div className="mt-8">
-        <Link href="/login" className="rounded-md bg-neutral-900 px-4 py-2 text-white">
-          Sign in
+      <div className="mt-8 flex gap-3">
+        <Link href="/login" className="btn btn-primary">
+          Sign in →
         </Link>
       </div>
     </main>
