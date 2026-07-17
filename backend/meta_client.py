@@ -84,15 +84,33 @@ def _post(path: str, token: str, data: dict | None = None,
 # ============================================================
 
 def build_oauth_url(state: str, scopes: list[str]) -> str:
-    """URL to redirect the user to for Facebook Login."""
-    params = {
-        "client_id": settings.meta_app_id,
-        "redirect_uri": settings.meta_redirect_uri,
-        "state": state,
-        "scope": ",".join(scopes),
-        "response_type": "code",
-    }
+    """URL to redirect the user to for Facebook Login.
+
+    Two supported modes:
+    - Classic Facebook Login: pass scope + redirect_uri. Only available on
+      apps created before Meta locked classic login for Business-type apps.
+    - Facebook Login for Business (new): pass config_id (which encapsulates
+      the permission set + redirect URI configured in the Meta console).
+      Detected by META_LOGIN_CONFIG_ID being set. Meta does NOT accept
+      scope/redirect_uri in this mode — the configuration owns them.
+    """
     from urllib.parse import urlencode
+    config_id = (getattr(settings, "meta_login_config_id", "") or "").strip()
+    if config_id:
+        params = {
+            "client_id": settings.meta_app_id,
+            "config_id": config_id,
+            "state": state,
+            "response_type": "code",
+        }
+    else:
+        params = {
+            "client_id": settings.meta_app_id,
+            "redirect_uri": settings.meta_redirect_uri,
+            "state": state,
+            "scope": ",".join(scopes),
+            "response_type": "code",
+        }
     return f"https://www.facebook.com/{settings.meta_api_version}/dialog/oauth?{urlencode(params)}"
 
 

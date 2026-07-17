@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     meta_redirect_uri: str = ""                 # OAuth callback e.g. https://app.example/settings/connections/meta/callback
     meta_api_version: str = "v21.0"
     meta_use_sandbox: bool = False              # set True while awaiting App Review — uses ad-account sandbox mode
+    meta_login_config_id: str = ""              # Facebook Login for Business config id; if set, drives OAuth via config_id
     # Fernet key for encrypting stored OAuth tokens at rest. Generate with:
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str = ""
