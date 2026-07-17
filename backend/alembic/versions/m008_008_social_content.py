@@ -1,5 +1,5 @@
 """008_social_content — wraps db/migrations/008_social_content.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m008"
 down_revision = 'm007'

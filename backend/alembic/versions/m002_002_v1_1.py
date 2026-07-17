@@ -1,5 +1,5 @@
 """002_v1_1 — wraps db/migrations/002_v1_1.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m002"
 down_revision = 'm001'

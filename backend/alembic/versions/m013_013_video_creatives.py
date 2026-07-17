@@ -1,5 +1,5 @@
 """013_video_creatives — wraps db/migrations/013_video_creatives.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m013"
 down_revision = 'm012'

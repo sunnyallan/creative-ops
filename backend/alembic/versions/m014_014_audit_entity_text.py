@@ -1,5 +1,5 @@
 """014_audit_entity_text — wraps db/migrations/014_audit_entity_text.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m014"
 down_revision = "m013"

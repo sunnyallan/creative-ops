@@ -1,5 +1,5 @@
 """001_init — wraps db/migrations/001_init.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m001"
 down_revision = None

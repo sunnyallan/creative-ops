@@ -1,5 +1,5 @@
 """006_multi_brand — wraps db/migrations/006_multi_brand.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m006"
 down_revision = 'm005'

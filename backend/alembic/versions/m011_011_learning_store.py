@@ -1,5 +1,5 @@
 """011_learning_store — wraps db/migrations/011_learning_store.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m011"
 down_revision = 'm010'

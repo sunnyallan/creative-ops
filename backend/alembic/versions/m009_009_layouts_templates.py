@@ -1,5 +1,5 @@
 """009_layouts_templates — wraps db/migrations/009_layouts_templates.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m009"
 down_revision = 'm008'

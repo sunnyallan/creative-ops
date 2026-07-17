@@ -1,5 +1,5 @@
 """012_meta_connections — wraps db/migrations/012_meta_connections.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m012"
 down_revision = 'm011'

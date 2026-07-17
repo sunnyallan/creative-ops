@@ -1,5 +1,5 @@
 """004_creative_persona — wraps db/migrations/004_creative_persona.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m004"
 down_revision = 'm003'

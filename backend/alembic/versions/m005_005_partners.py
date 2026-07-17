@@ -1,5 +1,5 @@
 """005_partners — wraps db/migrations/005_partners.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m005"
 down_revision = 'm004'

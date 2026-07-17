@@ -1,5 +1,5 @@
 """007_drop_brand_kits — wraps db/migrations/007_drop_brand_kits.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m007"
 down_revision = 'm006'

@@ -1,5 +1,5 @@
 """010_creative_editor — wraps db/migrations/010_creative_editor.sql"""
-from alembic._sql_runner import run_sql_file
+from db.sql_runner import run_sql_file
 
 revision = "m010"
 down_revision = 'm009'
