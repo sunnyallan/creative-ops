@@ -13,6 +13,7 @@ Meta OAuth flow:
 """
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from typing import Any
@@ -234,7 +235,11 @@ def select_targets(payload: SelectIn, user: CurrentUser = Depends(current_user))
             "insert into audit_log (tenant_id, user_id, action, entity, entity_id, meta) "
             "values (%s, %s, 'meta.select', 'meta_connection', %s, %s::jsonb)",
             (str(user.tenant_id), str(user.user_id), str(payload.connection_id),
-             '{"ad_account": ' + repr(payload.ad_account_id or "") + '}'),
+             json.dumps({
+                 "ad_account": payload.ad_account_id or "",
+                 "page_id": payload.page_id or "",
+                 "ig_user_id": payload.ig_user_id or "",
+             })),
         )
     return {"ok": True}
 
