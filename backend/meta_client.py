@@ -96,21 +96,19 @@ def build_oauth_url(state: str, scopes: list[str]) -> str:
     """
     from urllib.parse import urlencode
     config_id = (getattr(settings, "meta_login_config_id", "") or "").strip()
+    # Facebook wants redirect_uri in BOTH modes — in config_id mode it's
+    # cross-checked against the Configuration's stored URI. Omitting it
+    # returns "No redirect URI in the params".
+    params: dict[str, str] = {
+        "client_id": settings.meta_app_id,
+        "redirect_uri": settings.meta_redirect_uri,
+        "state": state,
+        "response_type": "code",
+    }
     if config_id:
-        params = {
-            "client_id": settings.meta_app_id,
-            "config_id": config_id,
-            "state": state,
-            "response_type": "code",
-        }
+        params["config_id"] = config_id
     else:
-        params = {
-            "client_id": settings.meta_app_id,
-            "redirect_uri": settings.meta_redirect_uri,
-            "state": state,
-            "scope": ",".join(scopes),
-            "response_type": "code",
-        }
+        params["scope"] = ",".join(scopes)
     return f"https://www.facebook.com/{settings.meta_api_version}/dialog/oauth?{urlencode(params)}"
 
 
