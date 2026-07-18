@@ -170,9 +170,13 @@ def create_campaign(
     objective: str = "OUTCOME_TRAFFIC", status: str = "PAUSED",
     special_ad_categories: list[str] | None = None,
 ) -> dict:
+    # special_ad_categories must be a JSON array. Empty list = "no special
+    # category" — Meta rejects the campaign entirely if this field is missing
+    # or malformed on Business-verified accounts in regulated regions (India,
+    # US, EU). Send as JSON to avoid the earlier "Invalid parameter" error.
     return _post(f"/{ad_account_id}/campaigns", user_token, {
         "name": name, "objective": objective, "status": status,
-        "special_ad_categories": ",".join(special_ad_categories or []) or "[]",
+        "special_ad_categories": _to_json(special_ad_categories or []),
     })
 
 

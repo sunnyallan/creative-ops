@@ -180,12 +180,25 @@ class MetaAdsAdapter:
             )
 
         # Import here to keep the module import cheap (avoid httpx at boot)
-        from meta_client import (create_ad, create_adset,
+        from meta_client import (MetaAPIError, create_ad, create_adset,
                                  create_campaign, create_link_ad_creative,
                                  upload_creative_image, with_retry)
 
+        def _step(label: str, fn, *args, **kw):
+            """Run a Meta call with a stage label so the iteration.error
+            field shows exactly which step Meta rejected + WHY."""
+            try:
+                return with_retry(fn, *args, **kw)
+            except MetaAPIError as e:
+                raise RuntimeError(
+                    f"meta_ads {label} failed: {e} "
+                    f"(code={e.code} subcode={e.subcode} status={e.status_code} "
+                    f"trace={e.fbtrace_id})"
+                ) from e
+
         image_bytes = _download(storage_path)
-        image_hash = with_retry(
+        image_hash = _step(
+            "upload_image",
             upload_creative_image, conn_info["ad_account_id"],
             conn_info["user_token"], image_bytes,
             filename=f"iter_{iteration_id[:8]}.webp",
@@ -193,7 +206,8 @@ class MetaAdsAdapter:
 
         # 1. Campaign
         # NOTE: iteration-per-campaign so insights are cleanly separable.
-        camp = with_retry(
+        camp = _step(
+            "create_campaign",
             create_campaign, conn_info["ad_account_id"], conn_info["user_token"],
             name=f"exp:{iteration_id[:8]}:{format}",
             objective="OUTCOME_TRAFFIC", status="PAUSED",
@@ -201,7 +215,8 @@ class MetaAdsAdapter:
         # 2. AdSet — daily_budget is in minor units (paise/cents).
         # Spend_planned is our top-level cap; use it as the daily budget for a 1-day run.
         opt_goal, billing = _OPT_GOAL_BY_METRIC.get("clicks", ("LINK_CLICKS", "IMPRESSIONS"))
-        adset = with_retry(
+        adset = _step(
+            "create_adset",
             create_adset, conn_info["ad_account_id"], conn_info["user_token"],
             campaign_id=camp["id"], name=f"exp:{iteration_id[:8]}:as",
             daily_budget_minor_units=max(100, int(spend_planned * 100)),
@@ -212,7 +227,8 @@ class MetaAdsAdapter:
         )
         # 3. Creative
         link_url = _link_url_for_creative(tenant_uuid, storage_path)
-        creative = with_retry(
+        creative = _step(
+            "create_creative",
             create_link_ad_creative, conn_info["ad_account_id"], conn_info["user_token"],
             page_id=conn_info["page_id"], image_hash=image_hash,
             headline=copy.get("headline") or "", body=copy.get("body") or "",
@@ -222,7 +238,8 @@ class MetaAdsAdapter:
         )
         # 4. Ad — sandbox mode leaves it PAUSED; live mode ACTIVE
         ad_status = "PAUSED" if settings.meta_use_sandbox else "ACTIVE"
-        ad = with_retry(
+        ad = _step(
+            "create_ad",
             create_ad, conn_info["ad_account_id"], conn_info["user_token"],
             name=f"exp:{iteration_id[:8]}", adset_id=adset["id"],
             creative_id=creative["id"], status=ad_status,
