@@ -25,14 +25,18 @@ from token_crypto import decrypt
 log = logging.getLogger("instagram_organic")
 
 
-def _load_ig_connection(tenant_id: UUID) -> dict | None:
+def _load_ig_connection(tenant_id: UUID, brand_id: UUID | None = None) -> dict | None:
     with tenant_connection(tenant_id) as conn:
         r = conn.execute(
-            "SELECT id, selected_ig_user_id, selected_page_access_token, selected_page_id "
+            "SELECT id, selected_ig_user_id, selected_page_access_token, selected_page_id, brand_id "
             "FROM meta_connections WHERE tenant_id = %s AND status = 'connected' "
             "AND selected_ig_user_id IS NOT NULL "
-            "ORDER BY updated_at DESC LIMIT 1",
-            (str(tenant_id),),
+            "ORDER BY CASE "
+            "  WHEN brand_id = %s THEN 0 "
+            "  WHEN brand_id IS NULL THEN 1 "
+            "  ELSE 2 END, "
+            "updated_at DESC LIMIT 1",
+            (str(tenant_id), str(brand_id) if brand_id else None),
         ).fetchone()
     if not r:
         return None
@@ -41,6 +45,7 @@ def _load_ig_connection(tenant_id: UUID) -> dict | None:
         "ig_user_id": r[1],
         "page_token": decrypt(r[2]) if r[2] else None,
         "page_id": r[3],
+        "brand_id": str(r[4]) if r[4] else None,
     }
 
 
@@ -72,9 +77,11 @@ class InstagramOrganicAdapter:
         self, *, tenant_id: str, iteration_id: str, creative_id: str,
         storage_path: str, copy: dict[str, Any], format: str,
         persona: str | None, spend_planned: float,
+        brand_id: str | None = None,
     ) -> dict[str, Any]:
         tenant_uuid = UUID(tenant_id)
-        conn_info = _load_ig_connection(tenant_uuid)
+        brand_uuid = UUID(brand_id) if brand_id else None
+        conn_info = _load_ig_connection(tenant_uuid, brand_uuid)
         if not conn_info:
             raise RuntimeError(
                 "no Instagram Business account connected — link one at /settings/connections"

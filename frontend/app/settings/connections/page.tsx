@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { useBrand } from "@/lib/brand-context";
 
 type Connection = {
   id: string;
@@ -8,6 +9,7 @@ type Connection = {
   meta_user_id: string;
   meta_user_name: string | null;
   status: "connected" | "disconnected" | "error";
+  brand_id: string | null;
   selected_ad_account_id: string | null;
   selected_page_id: string | null;
   selected_page_name: string | null;
@@ -22,10 +24,18 @@ type Page = { id: string; name: string; page_access_token?: string; ig?: { id: s
 type AdAccount = { id: string; name: string; currency?: string; account_status?: number };
 
 export default function ConnectionsPage() {
+  const { brands, activeBrandId } = useBrand();
   const [conns, setConns] = useState<Connection[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ connectionId: string; adAccounts: AdAccount[]; pages: Page[] } | null>(null);
+  // Which brand should the NEW connection bind to? Defaults to active brand;
+  // user can flip to "All brands (tenant default)" via the switch below.
+  const [connectBrandId, setConnectBrandId] = useState<string | "">(activeBrandId ?? "");
+  useEffect(() => { if (activeBrandId && !connectBrandId) setConnectBrandId(activeBrandId); }, [activeBrandId]);
+
+  const brandName = (id: string | null) =>
+    id ? (brands.find((b) => b.id === id)?.name ?? "unknown brand") : "All brands (tenant default)";
 
   async function load() {
     try { setConns(await apiFetch<Connection[]>("/connections")); }
@@ -36,7 +46,8 @@ export default function ConnectionsPage() {
   async function connect() {
     setBusy("connect"); setErr(null);
     try {
-      const { url } = await apiFetch<{ url: string; state: string }>("/connections/meta/oauth-url");
+      const q = connectBrandId ? `?brand_id=${encodeURIComponent(connectBrandId)}` : "";
+      const { url } = await apiFetch<{ url: string; state: string }>(`/connections/meta/oauth-url${q}`);
       window.location.href = url;
     } catch (e: any) {
       setErr(e.message);
@@ -87,9 +98,21 @@ export default function ConnectionsPage() {
             in one connection. Sandbox works today; live publishing waits on Meta App Review.
           </p>
         </div>
-        <button onClick={connect} disabled={busy === "connect"} className="btn btn-primary text-sm">
-          {busy === "connect" ? "…" : "+ Connect Meta"}
-        </button>
+        <div className="flex items-end gap-2">
+          <label className="text-xs text-muted">
+            Bind to brand
+            <select value={connectBrandId} onChange={(e) => setConnectBrandId(e.target.value)}
+              className="input mt-1 text-sm">
+              <option value="">All brands (tenant default)</option>
+              {brands.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </label>
+          <button onClick={connect} disabled={busy === "connect"} className="btn btn-primary text-sm">
+            {busy === "connect" ? "…" : "+ Connect Meta"}
+          </button>
+        </div>
       </div>
 
       {err && <div className="chip chip-danger mt-3">{err}</div>}
@@ -108,11 +131,12 @@ export default function ConnectionsPage() {
             <article key={c.id} className="surface p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm text-fg font-medium">{c.meta_user_name || "Meta user"}</span>
                     <span className={`chip ${c.status === "connected" ? "chip-success" : c.status === "error" ? "chip-danger" : "chip-warn"}`}>
                       {c.status}
                     </span>
+                    <span className="chip chip-accent">◈ {brandName(c.brand_id)}</span>
                     {c.selected_ig_username && <span className="chip">IG @{c.selected_ig_username}</span>}
                   </div>
                   <div className="text-xs text-muted mt-1">

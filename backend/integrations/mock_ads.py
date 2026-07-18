@@ -53,6 +53,7 @@ class MockAdsAdapter:
         format: str,                    # static | carousel | video
         persona: str | None,
         spend_planned: float,
+        brand_id: str | None = None,   # unused by mock but part of adapter Protocol
     ) -> dict[str, Any]:
         """Simulate creating a paused ad; return a stable publish_ref."""
         rng = _seed_from("publish", iteration_id)

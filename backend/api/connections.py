@@ -54,6 +54,7 @@ class ConnectionOut(BaseModel):
     meta_user_id: str
     meta_user_name: str | None
     status: str
+    brand_id: UUID | None = None       # scoped to this brand; null = tenant default
     selected_ad_account_id: str | None
     selected_page_id: str | None
     selected_page_name: str | None
@@ -74,12 +75,13 @@ def _row(r: tuple) -> ConnectionOut:
         token_expires_at=r[9].isoformat() if r[9] else None,
         last_verified_at=r[10].isoformat() if r[10] else None,
         last_error=r[11],
+        brand_id=r[12],
     )
 
 
 _SELECT = ("id, meta_user_id, meta_user_name, status, selected_ad_account_id, "
            "selected_page_id, selected_page_name, selected_ig_user_id, "
-           "selected_ig_username, token_expires_at, last_verified_at, last_error")
+           "selected_ig_username, token_expires_at, last_verified_at, last_error, brand_id")
 
 
 # ============================================================
@@ -87,23 +89,27 @@ _SELECT = ("id, meta_user_id, meta_user_name, status, selected_ad_account_id, "
 # ============================================================
 
 @router.get("/meta/oauth-url")
-def get_oauth_url(user: CurrentUser = Depends(current_user)):
-    """Returns a Facebook Login URL. The tenant is bound into a short-lived
-    `state` token that we verify on callback."""
+def get_oauth_url(
+    brand_id: UUID | None = Query(None),
+    user: CurrentUser = Depends(current_user),
+):
+    """Returns a Facebook Login URL. The tenant + (optional) brand are bound
+    into the `state` token so the callback knows which brand to attach the
+    resulting connection to."""
     if not (settings.meta_app_id and settings.meta_app_secret and settings.meta_redirect_uri):
         raise HTTPException(503, "Meta integration not configured — set META_APP_ID, "
                                  "META_APP_SECRET, META_REDIRECT_URI on the API service")
     from meta_client import build_oauth_url
 
     state_token = secrets.token_urlsafe(24)
-    # Persist a one-shot state row (reuses audit_log for simplicity — a
-    # dedicated oauth_states table is Phase E polish).
+    # Persist a one-shot state row w/ the intended brand for this connection.
     with tenant_connection(user.tenant_id) as conn:
         conn.execute(
             "insert into audit_log (tenant_id, user_id, action, entity, entity_id, meta) "
             "values (%s, %s, 'meta.oauth.state', 'meta_connection', %s, %s::jsonb)",
             (str(user.tenant_id), str(user.user_id), state_token,
-             '{"expires_in": 600}'),
+             json.dumps({"expires_in": 600,
+                         "brand_id": str(brand_id) if brand_id else None})),
         )
     return {"url": build_oauth_url(state_token, _META_SCOPES), "state": state_token}
 
@@ -116,16 +122,18 @@ def oauth_callback(code: str = Query(...), state: str = Query(...),
                              list_ad_accounts, list_pages,
                              get_ig_business_account, MetaAPIError)
 
-    # Verify state — recent, matching tenant
+    # Verify state — recent, matching tenant. Also pluck the target brand_id
+    # that /oauth-url stashed on the state row.
     with tenant_connection(user.tenant_id) as conn:
         r = conn.execute(
-            "SELECT id FROM audit_log WHERE tenant_id = %s AND action = 'meta.oauth.state' "
+            "SELECT id, meta FROM audit_log WHERE tenant_id = %s AND action = 'meta.oauth.state' "
             "AND entity_id = %s AND created_at > now() - interval '15 minutes' "
             "ORDER BY created_at DESC LIMIT 1",
             (str(user.tenant_id), state),
         ).fetchone()
     if not r:
         raise HTTPException(400, "invalid or expired OAuth state")
+    brand_id_for_conn = ((r[1] or {}).get("brand_id")) if isinstance(r[1], dict) else None
 
     try:
         short = exchange_code(code)
@@ -142,16 +150,17 @@ def oauth_callback(code: str = Query(...), state: str = Query(...),
 
     with tenant_connection(user.tenant_id) as conn:
         conn.execute(
-            "INSERT INTO meta_connections (tenant_id, meta_user_id, meta_user_name, "
+            "INSERT INTO meta_connections (tenant_id, brand_id, meta_user_id, meta_user_name, "
             "encrypted_access_token, token_scopes, token_expires_at, status, last_verified_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, 'connected', now()) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, 'connected', now()) "
             "ON CONFLICT (tenant_id, meta_user_id) DO UPDATE SET "
+            "brand_id = EXCLUDED.brand_id, "
             "encrypted_access_token = EXCLUDED.encrypted_access_token, "
             "token_scopes = EXCLUDED.token_scopes, "
             "token_expires_at = EXCLUDED.token_expires_at, "
             "status = 'connected', last_verified_at = now(), last_error = NULL, "
             "meta_user_name = EXCLUDED.meta_user_name, updated_at = now()",
-            (str(user.tenant_id), me["id"], me.get("name"),
+            (str(user.tenant_id), brand_id_for_conn, me["id"], me.get("name"),
              encrypt(user_token), _META_SCOPES, expires_at),
         )
         conn.execute(

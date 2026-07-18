@@ -393,6 +393,7 @@ def _publish_iteration(tenant_id: UUID, experiment: dict, iteration: dict, plan:
         copy={"headline": headline, "body": body, "cta": cta},
         format=plan["format"], persona=plan.get("persona"),
         spend_planned=float(plan["spend_planned"]),
+        brand_id=experiment.get("brand_id"),
     )
     # Record a deployments row for consistency with the existing dispatch path
     with tenant_connection(tenant_id) as conn:
