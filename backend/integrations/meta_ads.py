@@ -65,15 +65,22 @@ _OPT_GOAL_BY_METRIC = {
 }
 
 
-def _load_connection(tenant_id: UUID) -> dict | None:
+def _load_connection(tenant_id: UUID, brand_id: UUID | None = None) -> dict | None:
+    """Pick the best meta_connection for (tenant, brand).
+    Preference: brand-specific > tenant-default (brand_id NULL) > any other.
+    """
     with tenant_connection(tenant_id) as conn:
         r = conn.execute(
             "SELECT id, meta_user_id, encrypted_access_token, token_expires_at, "
             "selected_ad_account_id, selected_page_id, selected_page_access_token, "
-            "selected_ig_user_id, status "
+            "selected_ig_user_id, status, brand_id "
             "FROM meta_connections WHERE tenant_id = %s AND status = 'connected' "
-            "ORDER BY updated_at DESC LIMIT 1",
-            (str(tenant_id),),
+            "ORDER BY CASE "
+            "  WHEN brand_id = %s THEN 0 "
+            "  WHEN brand_id IS NULL THEN 1 "
+            "  ELSE 2 END, "
+            "updated_at DESC LIMIT 1",
+            (str(tenant_id), str(brand_id) if brand_id else None),
         ).fetchone()
     if not r:
         return None
@@ -84,6 +91,7 @@ def _load_connection(tenant_id: UUID) -> dict | None:
         "ad_account_id": r[4], "page_id": r[5],
         "page_token": decrypt(r[6]) if r[6] else None,
         "ig_user_id": r[7], "status": r[8],
+        "brand_id": str(r[9]) if r[9] else None,
     }
 
 
@@ -148,12 +156,14 @@ class MetaAdsAdapter:
         self, *, tenant_id: str, iteration_id: str, creative_id: str,
         storage_path: str, copy: dict[str, Any], format: str,
         persona: str | None, spend_planned: float,
+        brand_id: str | None = None,
     ) -> dict[str, Any]:
         tenant_uuid = UUID(tenant_id)
-        conn_info = _load_connection(tenant_uuid)
+        brand_uuid = UUID(brand_id) if brand_id else None
+        conn_info = _load_connection(tenant_uuid, brand_uuid)
         if not conn_info:
             raise RuntimeError(
-                "no Meta connection for this tenant — connect one at "
+                "no Meta connection for this tenant/brand — connect one at "
                 "/settings/connections before running meta_ads iterations"
             )
 
@@ -170,7 +180,7 @@ class MetaAdsAdapter:
             )
 
         # Import here to keep the module import cheap (avoid httpx at boot)
-        from meta_client import (create_ad, create_ad_creative, create_adset,
+        from meta_client import (create_ad, create_adset,
                                  create_campaign, create_link_ad_creative,
                                  upload_creative_image, with_retry)
 
