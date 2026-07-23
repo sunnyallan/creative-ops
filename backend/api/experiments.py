@@ -41,7 +41,9 @@ class ExperimentIn(BaseModel):
     per_iteration_cap: float | None = None
     channels: list[str] = Field(default_factory=lambda: ["mock_ads"])
     brand_id: UUID | None = None
-    metric_window_hours: int = Field(48, ge=1, le=168)
+    # Numeric so demos can set fractional windows (e.g. 0.0833 = 5 minutes).
+    # Min 0.01 (~36s), max 168 (7 days).
+    metric_window_hours: float = Field(48, ge=0.01, le=168)
     min_spend_for_verdict: float = Field(100.0, ge=0)
     max_iterations: int = Field(20, ge=1, le=100)
 
@@ -58,7 +60,7 @@ class ExperimentOut(BaseModel):
     per_iteration_cap: float | None
     channels: list[str]
     status: str
-    metric_window_hours: int
+    metric_window_hours: float
     min_spend_for_verdict: float
     max_iterations: int
     created_at: str
@@ -110,7 +112,7 @@ def _row_to_experiment(r: tuple) -> ExperimentOut:
         budget_committed=float(r[7]),
         per_iteration_cap=float(r[8]) if r[8] is not None else None,
         channels=list(r[9] or []), status=r[10],
-        metric_window_hours=int(r[11]), min_spend_for_verdict=float(r[12]),
+        metric_window_hours=float(r[11]), min_spend_for_verdict=float(r[12]),
         max_iterations=int(r[13]),
         created_at=r[14].isoformat(), updated_at=r[15].isoformat(),
         latest_report=r[16],

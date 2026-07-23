@@ -26,7 +26,11 @@ from workers.celery_app import celery_app
 from workers.compositor import composite
 
 MODEL_PRO = "gemini-2.5-flash"
-MODEL_IMAGE = "gemini-3-pro-image"  # Nano Banana Pro — ~3-4x cost, much better prompt adherence
+import os as _os
+# Default: Nano Banana Pro (best prompt adherence, ~30-60s per image).
+# Override to gemini-2.5-flash-image ("Nano Banana", ~10-15s, cheaper, still solid)
+# via env for demo speed. Set IMAGE_MODEL_ID in Railway variables.
+MODEL_IMAGE = _os.getenv("IMAGE_MODEL_ID", "gemini-3-pro-image")
 
 USE_FALLBACK = False
 # Set False when Gemini billing is enabled — uses real Nano Banana image gen.
@@ -704,8 +708,36 @@ def generate_creative(tenant_id: str, campaign_id: str, brief_index: int) -> str
              json.dumps({k: v for k, v in brief.items() if not k.startswith("_")}, default=str)),
         )
 
-    # Kick governance
-    from workers.governance import run_governance
-    run_governance.delay(tenant_id, str(creative_id))
+    # Governance: skip when the campaign opted out (orchestrator sets this on
+    # mock/sandbox experiment iterations to shave 15-25s per iteration —
+    # nothing goes to real audiences, so brand-safety review is optional).
+    # Instead, mark the creative as passed and kick the orchestrator tick
+    # immediately so publish runs on the same second.
+    skip_gov = False
+    try:
+        with tenant_connection(t_uuid) as conn:
+            r = conn.execute(
+                "SELECT skip_governance FROM campaigns WHERE id = %s",
+                (campaign_id,),
+            ).fetchone()
+        skip_gov = bool(r and r[0])
+    except Exception:
+        skip_gov = False
+
+    if skip_gov:
+        with tenant_connection(t_uuid) as conn:
+            conn.execute(
+                "UPDATE creatives SET governance_status = 'passed', "
+                "governance_issues = '{\"skipped\": true, \"reason\": \"experiment_fast_path\"}'::jsonb "
+                "WHERE id = %s", (str(creative_id),),
+            )
+        try:
+            from workers.orchestrator_tick import orchestrator_tick
+            orchestrator_tick.delay()
+        except Exception:
+            pass
+    else:
+        from workers.governance import run_governance
+        run_governance.delay(tenant_id, str(creative_id))
 
     return str(creative_id)

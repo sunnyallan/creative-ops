@@ -115,7 +115,8 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
   const [budget, setBudget] = useState("3000");
   const [perIterCap, setPerIterCap] = useState("500");
   const [channels, setChannels] = useState<string[]>(["mock_ads"]);
-  const [metricWindow, setMetricWindow] = useState("1");
+  // Stored as minutes in UI (1440 = 24h). Converted to hours at submit.
+  const [metricWindowMin, setMetricWindowMin] = useState("5");
   const [minSpend, setMinSpend] = useState("50");
   const [maxIter, setMaxIter] = useState("6");
   const [submitting, setSubmitting] = useState(false);
@@ -133,7 +134,7 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
           budget_total: Number(budget),
           per_iteration_cap: perIterCap ? Number(perIterCap) : null,
           channels, brand_id: activeBrandId || null,
-          metric_window_hours: Number(metricWindow),
+          metric_window_hours: Math.max(0.01, Number(metricWindowMin) / 60),
           min_spend_for_verdict: Number(minSpend),
           max_iterations: Number(maxIter),
         }),
@@ -194,9 +195,10 @@ function CreateForm({ onCreated }: { onCreated: () => void }) {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
-          <label className="field">Metric window (hours)</label>
-          <input required type="number" value={metricWindow} onChange={(e) => setMetricWindow(e.target.value)} className="input" />
-          <div className="text-[10px] text-subtle mt-1">1 for demo · 48 for real Meta ads</div>
+          <label className="field">Metric window (minutes)</label>
+          <input required type="number" min={1} value={metricWindowMin}
+            onChange={(e) => setMetricWindowMin(e.target.value)} className="input" />
+          <div className="text-[10px] text-subtle mt-1">5 for fast demo · 60 for hourly · 2880 for real 48h Meta window</div>
         </div>
         <div>
           <label className="field">Min spend for verdict (₹)</label>

@@ -102,7 +102,7 @@ export default function ExperimentDetail() {
             <span>·</span>
             <span>{d.channels.join(", ")}</span>
             <span>·</span>
-            <span>window {d.metric_window_hours}h</span>
+            <span>window {d.metric_window_hours < 1 ? `${Math.round(d.metric_window_hours * 60)}m` : `${d.metric_window_hours}h`}</span>
             <span>·</span>
             <span>max {d.max_iterations} iters</span>
             <StatusChip status={d.status} />

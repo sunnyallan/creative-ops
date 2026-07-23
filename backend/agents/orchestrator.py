@@ -60,7 +60,7 @@ def _load_experiment(tenant_id: UUID, experiment_id: str) -> dict | None:
         "budget_total": float(r[6]), "budget_spent": float(r[7]),
         "budget_committed": float(r[8]), "per_iteration_cap": float(r[9]) if r[9] is not None else None,
         "channels": list(r[10] or []),
-        "status": r[11], "metric_window_hours": int(r[12]),
+        "status": r[11], "metric_window_hours": float(r[12]),
         "min_spend_for_verdict": float(r[13]), "max_iterations": int(r[14]),
         "langgraph_thread_id": r[15],
     }
@@ -316,17 +316,26 @@ def _generate_creative_for_iteration(
     slide_count = 5 if fmt == "carousel" else 1
     media_type = "video" if fmt == "video" else "image"
 
+    # Fast-path: skip governance for orchestrator-generated creatives on
+    # channels that don't go to a real audience (mock_ads always; meta_ads
+    # while META_USE_SANDBOX=true since the ad stays PAUSED). Cuts 15-25s
+    # per iteration. Human-driven campaigns are unaffected.
+    channel = (plan.get("channel") or "").lower()
+    from config import settings
+    skip_gov = channel == "mock_ads" or (channel == "meta_ads" and settings.meta_use_sandbox)
+
     with tenant_connection(tenant_id) as conn:
         conn.execute(
             "insert into campaigns (id, tenant_id, brand_id, goal, persona_segment, status, "
-            "copy_constraints, content_type, carousel_slide_count, layout_style, media_type) "
-            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s, %s, %s, %s)",
+            "copy_constraints, content_type, carousel_slide_count, layout_style, media_type, "
+            "skip_governance) "
+            "values (%s, %s, %s, %s, %s, 'briefing', %s::jsonb, %s, %s, %s, %s, %s)",
             (
                 str(campaign_id), str(tenant_id),
                 experiment["brand_id"], plan.get("creative_brief", {}).get("goal") or experiment["goal"],
                 plan.get("persona"),
                 json.dumps({"headline_max_chars": 40, "body_max_chars": 90, "cta_max_chars": 20}),
-                content_type, slide_count, "auto", media_type,
+                content_type, slide_count, "auto", media_type, skip_gov,
             ),
         )
         conn.execute(
