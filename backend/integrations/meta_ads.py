@@ -127,11 +127,11 @@ class MetaAdsAdapter:
                  "reason": "no meta_connection for tenant"},
             )
         try:
-            image_bytes = _download(storage_path)
+            image_bytes = _to_jpeg(_download(storage_path))
             from meta_client import upload_creative_image
             image_hash = upload_creative_image(
                 conn_info["ad_account_id"], conn_info["user_token"],
-                image_bytes, filename=f"{creative_id}.webp",
+                image_bytes, filename=f"{creative_id}.jpg",
             )
         except Exception as e:
             log.warning("meta_ads.deploy: creative upload failed: %s", e)
@@ -196,12 +196,14 @@ class MetaAdsAdapter:
                     f"trace={e.fbtrace_id})"
                 ) from e
 
-        image_bytes = _download(storage_path)
+        # Meta /adimages only accepts JPEG or PNG (subcode 1487411 otherwise).
+        # We store creatives as WebP for size — transcode to JPEG here.
+        image_bytes = _to_jpeg(_download(storage_path))
         image_hash = _step(
             "upload_image",
             upload_creative_image, conn_info["ad_account_id"],
             conn_info["user_token"], image_bytes,
-            filename=f"iter_{iteration_id[:8]}.webp",
+            filename=f"iter_{iteration_id[:8]}.jpg",
         )
 
         # 1. Campaign
@@ -324,6 +326,26 @@ class MetaAdsAdapter:
 def _download(storage_path: str) -> bytes:
     from storage import download_bytes
     return download_bytes(storage_path)
+
+
+def _to_jpeg(image_bytes: bytes, quality: int = 88) -> bytes:
+    """Re-encode any image (usually our WebP output) as JPEG for Meta.
+    Meta's ad-image endpoint rejects WebP with subcode 1487411."""
+    import io
+    from PIL import Image
+    img = Image.open(io.BytesIO(image_bytes))
+    if img.mode != "RGB":
+        # JPEG doesn't support alpha; flatten onto white to keep the CTA
+        # pill/logo plates readable rather than going black.
+        if img.mode in ("RGBA", "LA"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[-1])
+            img = bg
+        else:
+            img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
 
 
 def _json(obj: Any) -> str:
