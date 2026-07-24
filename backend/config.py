@@ -40,5 +40,10 @@ class Settings(BaseSettings):
     # Base URL of THIS backend (used to build Meta OAuth state + callback URLs)
     api_base_url: str = ""
 
+    # Access control: comma-separated list of emails allowed to sign in.
+    # Empty = allow anyone (default for local dev). Set on the API service
+    # in prod to lock the app to specific accounts.
+    allowed_emails: str = ""
+
 
 settings = Settings()

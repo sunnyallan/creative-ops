@@ -1,8 +1,13 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase";
 
-export default function LoginPage() {
+export const dynamic = "force-dynamic";
+
+function LoginInner() {
+  const params = useSearchParams();
+  const forbidden = params.get("forbidden") === "1";
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -21,9 +26,17 @@ export default function LoginPage() {
 
   return (
     <main className="mx-auto max-w-md px-6 py-20">
-      <h1 className="text-2xl font-semibold">Sign in</h1>
+      <h1 className="text-2xl font-semibold text-fg">Sign in</h1>
+      <p className="text-sm text-muted mt-1">Magic link — enter your email and we'll send you a one-click sign-in.</p>
+
+      {forbidden && (
+        <div className="mt-4 chip chip-danger">
+          That email isn't allowed on this workspace. Contact the owner if you should have access.
+        </div>
+      )}
+
       {sent ? (
-        <p className="mt-4 text-neutral-700">Check your email for a magic link.</p>
+        <p className="mt-4 text-fg">Check your email for a magic link.</p>
       ) : (
         <form onSubmit={send} className="mt-6 space-y-3">
           <input
@@ -32,14 +45,20 @@ export default function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@brand.com"
-            className="w-full rounded-md border px-3 py-2"
+            className="input"
           />
-          <button className="w-full rounded-md bg-neutral-900 px-4 py-2 text-white">
-            Send magic link
-          </button>
-          {err && <p className="text-sm text-red-600">{err}</p>}
+          <button className="btn btn-primary w-full">Send magic link</button>
+          {err && <p className="text-sm text-danger-fg">{err}</p>}
         </form>
       )}
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="p-12 text-muted">Loading…</main>}>
+      <LoginInner />
+    </Suspense>
   );
 }

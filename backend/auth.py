@@ -74,6 +74,16 @@ def _ensure_tenant(user_id: UUID, email: str) -> UUID:
             return tenant_id
 
 
+def _allowed_email(email: str) -> bool:
+    """Check the ALLOWED_EMAILS allowlist. Empty allowlist = allow all
+    (dev-friendly default). Otherwise a case-insensitive exact match."""
+    raw = (settings.allowed_emails or "").strip()
+    if not raw:
+        return True
+    allowed = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    return (email or "").strip().lower() in allowed
+
+
 def current_user(authorization: str = Header(...)) -> CurrentUser:
     if not authorization.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "missing bearer token")
@@ -81,5 +91,13 @@ def current_user(authorization: str = Header(...)) -> CurrentUser:
     user = _verify_with_supabase(token)
     user_id = UUID(user["id"])
     email = user.get("email", "") or ""
+    if not _allowed_email(email):
+        # 403 (not 401) — token IS valid, this user is just not permitted.
+        # The frontend can differentiate: 401 → show login, 403 → show
+        # "you're signed in but this workspace isn't open to your email".
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"account {email or 'unknown'} is not permitted on this workspace",
+        )
     tenant_id = _ensure_tenant(user_id, email)
     return CurrentUser(user_id=user_id, email=email, tenant_id=tenant_id)
