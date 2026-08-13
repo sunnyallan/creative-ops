@@ -1,39 +1,69 @@
-# Creative Ops — MVP
+# Creative Ops
 
-AI-native creative operations. Brief → on-brand creatives → human review → (stubbed) platform deploy.
+Autonomous AI creative operations platform. Multi-tenant SaaS: brand teams enter a goal
+and a budget, the system researches, generates on-brand creatives (image + video +
+carousel), publishes to Meta / Instagram, measures real performance, distils learnings
+into a persistent brand memory, and iterates — until the goal is met or budget spent.
 
-Built against `d89d3f2d-07e6-4ed9-9272-f8f63808309c.md` (architecture doc), sliced to a 3-day closed-beta scope. See `~/.claude/plans/lets-plan-this-out-mellow-stroustrup.md` for the slice.
+**Status:** feature-complete through v4.0 as of August 2026. **Not currently
+deployed.** All hosted services torn down for cost reasons. Code preserved here for
+future revival.
+
+## 📚 Read these first
+
+1. **[docs/PROJECT-STATE.md](docs/PROJECT-STATE.md)** — durable knowledge base.
+   What exists, how it fits together, every trap we hit. Read this to understand the
+   codebase without archaeology.
+2. **[docs/REVIVAL-RUNBOOK.md](docs/REVIVAL-RUNBOOK.md)** — practical step-by-step
+   to bring the platform back from cold storage. ~45 min from empty accounts to
+   working platform.
 
 ## Stack
-- Next.js 15 (App Router, TS, Tailwind) + Supabase Auth + TanStack Query
-- FastAPI + LangGraph + Celery + Redis
-- Supabase (Postgres + pgvector + Storage) with RLS keyed on `app.current_tenant_id`
-- Gemini 3.1 Pro (briefing, copy, vision judge), Nano Banana `gemini-2.5-flash-image` (image gen)
-- Sightengine (brand-safety stage 2), Gemini vision judge (stage 3). Falconsai stage 1 deferred.
-- Pillow channel compositor — Meta 1080×1080 + WhatsApp 1200×628 for MVP.
 
-## What's stubbed
-- `integrations/google_ads.py`, `meta_ads.py`, `whatsapp.py`, `sendgrid.py` all conform to a `Deployer` Protocol and currently insert into `deployments` with `status='stubbed'`. Drop in real impls behind the same signature when API approvals land.
+- **Frontend:** Next.js 14 (App Router, TS, Tailwind, dark-first design tokens),
+  Supabase Auth (magic link + email allowlist), TanStack Query
+- **Backend:** FastAPI + Celery + LangGraph, Python 3.12
+- **Autonomous engine:** durable orchestrator loop (`agents/orchestrator.py`) with
+  budget ledger + hybrid guardrails + kill switch + auto-tick chain
+- **Learning store:** pgvector cosine similarity over `gemini-embedding-001`
+  embeddings, brand-scoped, injected as prompt priors on all future briefs
+- **Meta integration:** OAuth via Facebook Login for Business (`config_id`),
+  Fernet-encrypted tokens, per-brand connections, Marketing API + IG Content
+  Publishing API
+- **Video:** Veo 3.0 + ffmpeg end-card mux, sampled-frame governance
+- **DB:** Supabase Postgres + pgvector, RLS keyed on `app.current_tenant_id` GUC,
+  Alembic auto-apply migrations on API boot
+- **Storage:** Supabase Storage (`tenant-assets` bucket), batch-signed URLs
+- **AI models:** Gemini 2.5 Flash (LLM), Nano Banana Pro (image), Veo 3.0 (video),
+  Sightengine (brand safety)
 
-## Local dev
-1. `cp .env.example .env` — fill `GEMINI_API_KEY`, `SIGHTENGINE_*`, Supabase keys.
-2. Create a Supabase project, run `backend/db/migrations/001_init.sql` in the SQL editor, create a public bucket `tenant-assets`.
-3. `docker compose up --build`
-4. Visit http://localhost:3000 → sign in → onboarding → new campaign → review queue.
+## Live surfaces (when deployed)
 
-## Deploy
-- **Frontend** → Vercel: link repo `/frontend`, set `NEXT_PUBLIC_*` env vars.
-- **Backend + worker** → Railway: one service from `/backend` running `uvicorn`, second service same image running `celery -A workers.celery_app worker`. Add Redis plugin and set `REDIS_URL`.
-- **DB + storage + auth** → Supabase Cloud.
+- `/dashboard` — KPI overview
+- `/experiments` + `/experiments/[id]` — autonomous loop mission control
+- `/learnings` — brand memory library
+- `/review` — creatives queue with inline video playback + canvas editor
+- `/campaigns/new` — manual campaign creation with 20-layout picker or Penpot templates
+- `/brands` — 6-step wizard, reference banner style extraction
+- `/settings/connections` — per-brand Meta OAuth
 
-## Verification
-See plan file §Verification. Key checks: RLS isolation, governance flagging path, stubbed deployment row + `audit_log` after approve/reject.
+## What's stubbed / deferred
 
-## Penpot (v3.0 custom templates)
+- Google Ads adapter (stub only)
+- Meta video ads (chunked upload — use `instagram_organic` for video Reels instead)
+- Meta App Review for live spend (external 2-6 week clock; sandbox works today)
+- Penpot custom templates (feature works, self-hosting the Penpot backend on
+  Railway hit private-networking issues; runbook at `docs/penpot-railway-setup.md`)
 
-Custom creative templates are designed in a self-hosted Penpot instance and
-rendered by our pipeline. Setup runbook: [docs/penpot-railway-setup.md](docs/penpot-railway-setup.md).
-Backend needs `PENPOT_BASE_URL` + `PENPOT_ACCESS_TOKEN` env vars.
+## Repo layout
 
-## Post-Monday (deferred)
-Qdrant + CLIP recycling, learning loop / PostgresStore, multi-persona briefs, governance retry-loop cap, Langfuse, Stripe billing, Google display + emailer channels, Falconsai stage 1.
+- `backend/` — FastAPI + Celery worker + Alembic migrations
+- `frontend/` — Next.js App Router
+- `docs/` — PROJECT-STATE, REVIVAL-RUNBOOK, migrations, celery-beat-setup, meta-approval-filings, penpot-railway-setup
+- `docker-compose.yml` — local dev harness (not currently used)
+
+## When you're ready to redeploy
+
+Follow **[docs/REVIVAL-RUNBOOK.md](docs/REVIVAL-RUNBOOK.md)**. About 45 min from
+empty accounts to a working demo. All migrations auto-apply on first API boot —
+no manual SQL required.
