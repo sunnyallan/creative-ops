@@ -188,6 +188,11 @@ def create_adset(
     billing_event: str = "IMPRESSIONS",
     status: str = "PAUSED",
 ) -> dict:
+    # v23.0+: a new ad set with non-default age/geo must say whether Advantage+
+    # audience may widen it. Experiments need the audience as given, so off
+    # unless the caller set it.
+    targeting = {**targeting, "targeting_automation": {
+        "advantage_audience": 0, **(targeting.get("targeting_automation") or {})}}
     return _post(f"/{ad_account_id}/adsets", user_token, {
         "name": name, "campaign_id": campaign_id,
         "daily_budget": daily_budget_minor_units,
@@ -231,7 +236,8 @@ def create_link_ad_creative(
         },
     }
     if ig_user_id:
-        object_story_spec["instagram_actor_id"] = ig_user_id
+        # instagram_actor_id was removed on all versions on 2025-09-09.
+        object_story_spec["instagram_user_id"] = ig_user_id
     return _post(f"/{ad_account_id}/adcreatives", user_token, {
         "name": name,
         "object_story_spec": _to_json(object_story_spec),
@@ -255,7 +261,7 @@ def pause_ad(ad_id: str, user_token: str) -> dict:
 
 def get_insights(ad_id: str, user_token: str,
                  fields: list[str] | None = None,
-                 date_preset: str = "lifetime") -> dict:
+                 date_preset: str = "maximum") -> dict:   # "lifetime" is disabled since v10.0
     f = fields or ["impressions", "reach", "clicks", "ctr", "cpc", "spend",
                    "actions", "cost_per_action_type", "frequency"]
     body = _get(f"/{ad_id}/insights", user_token,
@@ -294,7 +300,10 @@ def publish_ig_media(ig_user_id: str, page_token: str, creation_id: str) -> dict
 
 def get_ig_insights(media_id: str, page_token: str,
                     metrics: list[str] | None = None) -> dict:
-    m = metrics or ["impressions", "reach", "engagement", "saved", "likes",
+    # impressions (v22.0, all versions 2025-04-21) and engagement are gone;
+    # views and total_interactions replace them, and are also returned under
+    # the old names so stored metrics keep their keys.
+    m = metrics or ["views", "reach", "total_interactions", "saved", "likes",
                     "comments", "shares", "follows"]
     body = _get(f"/{media_id}/insights", page_token,
                 {"metric": ",".join(m)})
@@ -303,6 +312,9 @@ def get_ig_insights(media_id: str, page_token: str,
         vals = row.get("values") or []
         if vals:
             out[row["name"]] = vals[-1].get("value")
+    for new, old in (("views", "impressions"), ("total_interactions", "engagement")):
+        if new in out:
+            out.setdefault(old, out[new])
     return out
 
 
@@ -328,14 +340,19 @@ def list_page_posts(page_id: str, page_token: str, limit: int = 25) -> list[dict
 
 def get_page_post_insights(post_id: str, page_token: str,
                             metrics: list[str] | None = None) -> dict:
-    m = metrics or ["post_impressions", "post_reactions_by_type_total",
-                    "post_clicks", "post_engaged_users"]
+    # post_impressions went on all versions on 2025-11-15 (post_media_view
+    # replaces it, also returned under the old name); post_engaged_users is
+    # no longer listed, and one bad metric fails the whole request.
+    m = metrics or ["post_media_view", "post_reactions_by_type_total",
+                    "post_clicks"]
     body = _get(f"/{post_id}/insights", page_token, {"metric": ",".join(m)})
     out = {}
     for row in body.get("data") or []:
         vals = row.get("values") or []
         if vals:
             out[row["name"]] = vals[-1].get("value")
+    if "post_media_view" in out:
+        out.setdefault("post_impressions", out["post_media_view"])
     return out
 
 

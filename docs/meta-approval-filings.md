@@ -128,7 +128,7 @@ On the API, worker, AND beat services in Railway:
     META_APP_ID=<from App Dashboard → Basic>
     META_APP_SECRET=<same>
     META_REDIRECT_URI=https://<api domain>/connections/meta/callback
-    META_API_VERSION=v21.0
+    META_API_VERSION=v27.0
     META_USE_SANDBOX=true          # flip to false only after live approval
     TOKEN_ENCRYPTION_KEY=<generate with the command in .env.example>
     API_BASE_URL=https://<api domain>

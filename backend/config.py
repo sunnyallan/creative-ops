@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     meta_app_id: str = ""
     meta_app_secret: str = ""
     meta_redirect_uri: str = ""                 # OAuth callback e.g. https://app.example/settings/connections/meta/callback
-    meta_api_version: str = "v21.0"
+    meta_api_version: str = "v27.0"            # Marketing API versions live ~1 year; v27.0 released 2026-11-04
     meta_use_sandbox: bool = False              # set True while awaiting App Review — uses ad-account sandbox mode
     meta_login_config_id: str = ""              # Facebook Login for Business config id; if set, drives OAuth via config_id
     # Fernet key for encrypting stored OAuth tokens at rest. Generate with:
